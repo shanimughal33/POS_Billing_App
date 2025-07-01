@@ -61,24 +61,29 @@ class InventoryCubit extends Cubit<InventoryState> {
     }
   }
 
-  Future<void> updateInventoryAfterSale(List<BillItem> billItems) async {
+  Future<void> updateInventoryAfterSale(List<BillItem> soldItems) async {
     try {
-      for (final billItem in billItems) {
-        final inventoryItem = _cachedItems.firstWhere(
-          (item) => item.name == billItem.name,
-          orElse: () => throw Exception('Item not found in inventory'),
-        );
-
-        final updatedItem = InventoryItem(
-          id: inventoryItem.id,
-          name: inventoryItem.name,
-          price: inventoryItem.price,
-          quantity: inventoryItem.quantity - billItem.quantity,
-          initialQuantity: inventoryItem.initialQuantity,
-          shortcut: inventoryItem.shortcut,
-        );
-
-        await repository.updateItem(updatedItem);
+      final currentItems = state is InventoryLoaded
+          ? (state as InventoryLoaded).items
+          : [];
+      for (final sold in soldItems) {
+        final idx = currentItems.indexWhere((inv) {
+          final invShortcut = (inv.shortcut ?? '').trim().toUpperCase();
+          final soldName = (sold.name).trim().toUpperCase();
+          final invName = (inv.name).trim().toUpperCase();
+          // Match by shortcut or by name
+          return invShortcut.isNotEmpty && invShortcut == soldName ||
+              invName == soldName;
+        });
+        if (idx != -1) {
+          final inv = currentItems[idx];
+          final newQty = (inv.quantity - sold.quantity).clamp(
+            0,
+            double.infinity,
+          );
+          final updated = inv.copyWith(quantity: newQty);
+          await repository.updateItem(updated);
+        }
       }
       await loadInventory();
     } catch (e) {

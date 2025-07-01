@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import '../models/bill_item.dart';
 import 'package:barcode_widget/barcode_widget.dart';
@@ -13,14 +11,14 @@ class POSReceipt extends StatelessWidget {
   final int billNumber;
 
   const POSReceipt({
-    super.key,
+    Key? key,
     required this.items,
     required this.total,
     required this.customerName,
     required this.paymentMethod,
     required this.dateTime,
     required this.billNumber,
-  });
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -569,6 +567,10 @@ class POSReceipt extends StatelessWidget {
         textAlign: TextAlign.center,
       ),
     );
+  }
+
+  Widget _tableVerticalLine({double height = 32, Color color = Colors.black}) {
+    return Container(width: 1.2, height: height, color: color);
   }
 
   Widget _buildTotalRow(String label, double amount, {bool isBold = false}) {

@@ -1,12 +1,13 @@
-// ignore_for_file: deprecated_member_use, use_build_context_synchronously
-
 import 'package:flutter/material.dart';
 import '../models/inventory_item.dart';
+import '../repositories/inventory_repository.dart';
+import '../main.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/inventory_cubit.dart';
+import '../utils/shortcut_validator.dart';
 
 class InventoryScreen extends StatelessWidget {
-  const InventoryScreen({super.key});
+  const InventoryScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +16,7 @@ class InventoryScreen extends StatelessWidget {
 }
 
 class InventoryView extends StatefulWidget {
-  const InventoryView({super.key});
+  const InventoryView({Key? key}) : super(key: key);
 
   @override
   State<InventoryView> createState() => _InventoryViewState();
@@ -23,23 +24,29 @@ class InventoryView extends StatefulWidget {
 
 class _InventoryViewState extends State<InventoryView> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    // Pre-fetch inventory data silently
-    Future.microtask(() {
-      if (mounted) context.read<InventoryCubit>().refreshInventory();
-    });
+    // Removed refreshInventory microtask to avoid unnecessary DB reloads
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Unfocus the search bar when returning to this screen
+    _searchFocusNode.unfocus();
   }
 
   void _search(String query) {
@@ -60,16 +67,16 @@ class _InventoryViewState extends State<InventoryView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Stats summary
+          // Stats summary (moved up)
           Container(
-            margin: const EdgeInsets.only(bottom: 0),
+            margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: const Color(0xFF128C7E),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.shade200,
+                  color: Colors.grey.withOpacity(0.1),
                   spreadRadius: 1,
                   blurRadius: 8,
                   offset: const Offset(0, 2),
@@ -86,8 +93,8 @@ class _InventoryViewState extends State<InventoryView> {
                 ),
                 _buildStatItem(
                   'Total Value',
-                  'Rs ${_calculateTotalValue(items)}',
-                  Icons.account_balance_wallet,
+                  'Rs  ${_calculateTotalValue(items)}',
+                  Icons.account_balance,
                 ),
                 _buildStatItem(
                   'Low Stock',
@@ -98,16 +105,16 @@ class _InventoryViewState extends State<InventoryView> {
             ),
           ),
 
-          // Search bar with animation
+          // Search bar (moved below stats)
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
+            margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.shade200,
+                  color: Colors.grey.withOpacity(0.1),
                   spreadRadius: 1,
                   blurRadius: 8,
                   offset: const Offset(0, 2),
@@ -116,12 +123,13 @@ class _InventoryViewState extends State<InventoryView> {
             ),
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
               onChanged: _search,
               style: const TextStyle(fontSize: 16),
               decoration: InputDecoration(
                 hintText: 'Search items...',
-                hintStyle: TextStyle(color: Colors.grey.shade400),
-                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -206,55 +214,27 @@ class _InventoryViewState extends State<InventoryView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.name,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF128C7E),
-                            ),
-                          ),
-                        ),
-                      ],
+                    // Name row only
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF128C7E),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.teal.shade50,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Rs ',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.teal.shade700,
-                                ),
-                              ),
-                              Text(
-                                item.price.toStringAsFixed(2),
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.teal.shade700,
-                                ),
-                              ),
-                            ],
+                        Text(
+                          '₨${item.price.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF128C7E),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 16),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -262,53 +242,55 @@ class _InventoryViewState extends State<InventoryView> {
                           ),
                           decoration: BoxDecoration(
                             color: isLowStock
-                                ? Colors.red.shade50
-                                : Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(6),
+                                ? Colors.red.withOpacity(0.1)
+                                : Colors.green.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             'Qty: ${item.quantity.toStringAsFixed(0)}',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: isLowStock
-                                  ? Colors.red.shade700
-                                  : Colors.green.shade700,
+                              color: isLowStock ? Colors.red : Colors.green,
                             ),
                           ),
                         ),
-                        if (item.shortcut != null) ...[
-                          const SizedBox(width: 8),
+                        // Shortcut container placed next to quantity
+                        if (item.shortcut != null && item.shortcut!.isNotEmpty)
                           Container(
+                            margin: const EdgeInsets.only(left: 10),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(6),
+                              color: const Color.fromARGB(
+                                255,
+                                217,
+                                234,
+                                250,
+                              ), // Blue color
+                              borderRadius: BorderRadius.circular(4),
                             ),
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  Icons.keyboard,
-                                  size: 14,
-                                  color: Colors.blue.shade700,
+                                  Icons.shortcut_sharp,
+                                  color: Colors.blue.shade500,
+                                  size: 16,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   item.shortcut!,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.blue.shade700,
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        ],
                       ],
                     ),
                   ],
@@ -399,9 +381,30 @@ class _InventoryViewState extends State<InventoryView> {
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: nameController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Item Name',
                     hintText: 'Enter item name',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 1,
+                      ),
+                    ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -416,9 +419,30 @@ class _InventoryViewState extends State<InventoryView> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Price (₨)',
                     hintText: 'Enter price',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 1,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 1,
+                      ),
+                    ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -437,9 +461,30 @@ class _InventoryViewState extends State<InventoryView> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Quantity',
                     hintText: 'Enter quantity',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 1,
+                      ),
+                    ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -455,9 +500,30 @@ class _InventoryViewState extends State<InventoryView> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: shortcutController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Shortcut (Optional)',
                     hintText: 'Enter shortcut code',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 0,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF128C7E),
+                        width: 1,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -609,8 +675,8 @@ class _InventoryViewState extends State<InventoryView> {
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showItemDialog(context),
         backgroundColor: const Color(0xFF128C7E),
-        tooltip: 'Add New Item',
         child: const Icon(Icons.add, color: Colors.white),
+        tooltip: 'Add New Item',
       ),
     );
   }

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import '../database/database_helper.dart';
 import '../models/bill_item.dart';
 
@@ -27,11 +26,11 @@ class BillRepository {
         final id = await txn.insert('bill_items', itemMap);
         if (id <= 0) throw Exception('Failed to insert item');
 
-        debugPrint('Successfully inserted item with ID: $id');
+        print('Successfully inserted item with ID: $id');
         return BillItem.fromMap({...itemMap, 'id': id});
       });
     } catch (e) {
-      debugPrint('Error inserting item: $e');
+      print('Error inserting item: $e');
       rethrow;
     }
   }
@@ -104,22 +103,22 @@ class BillRepository {
       ''');
 
       if (tableCheck.isEmpty) {
-        debugPrint('Table not found, returning empty list');
+        print('Table not found, returning empty list');
         return [];
       }
 
-      // Get all pending items with one query
+      // Get all active items with one query
       final items = await db.rawQuery('''
         SELECT * FROM bill_items 
-        WHERE status = 'pending' 
+        WHERE isDeleted = 0 
         ORDER BY serialNo ASC, createdAt ASC
       ''');
 
-      debugPrint('Found ${items.length} pending items');
+      print('Found ${items.length} active items');
 
       return items.map((map) => BillItem.fromMap(map)).toList();
     } catch (e) {
-      debugPrint('Error loading items: $e');
+      print('Error loading items: $e');
       rethrow;
     }
   }
@@ -127,24 +126,5 @@ class BillRepository {
   Future<void> clearAllBillItems() async {
     final db = await _databaseHelper.database;
     await db.delete('bill_items');
-  }
-
-  Future<void> markCurrentItemsAsCompleted() async {
-    try {
-      final db = await _databaseHelper.database;
-      await db.rawUpdate(
-        '''
-        UPDATE bill_items 
-        SET status = 'completed',
-            isDeleted = 1, 
-            deletedAt = ? 
-        WHERE status = 'pending'
-      ''',
-        [DateTime.now().toIso8601String()],
-      );
-    } catch (e) {
-      debugPrint('Error marking items as completed: $e');
-      rethrow;
-    }
   }
 }

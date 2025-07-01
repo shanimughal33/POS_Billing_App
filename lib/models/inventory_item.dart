@@ -31,14 +31,23 @@ class InventoryItem {
   }
 
   factory InventoryItem.fromMap(Map<String, dynamic> map) {
+    // Defensive: always parse as double for price, quantity, initialQuantity
+    double parseDouble(dynamic value) {
+      if (value == null) return 0.0;
+      if (value is double) return value;
+      if (value is int) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? 0.0;
+      return 0.0;
+    }
+
     return InventoryItem(
       id: map['id'] as int?,
       name: map['name'] as String,
-      price: (map['price'] as num).toDouble(),
-      quantity: (map['quantity'] as num).toDouble(),
+      price: parseDouble(map['price']),
+      quantity: parseDouble(map['quantity']),
       initialQuantity: map['initialQuantity'] != null
-          ? (map['initialQuantity'] as num).toDouble()
-          : (map['quantity'] as num).toDouble(),
+          ? parseDouble(map['initialQuantity'])
+          : parseDouble(map['quantity']),
       shortcut: map['shortcut'] as String?,
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'].toString())

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'dart:async';
@@ -18,44 +17,59 @@ class DatabaseHelper {
 
     try {
       final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'forward_billing.db');
+      final path = join(dbPath, 'billing.db');
+
+      print('Initializing database at: $path');
 
       _database = await openDatabase(
         path,
-        version: 2,
-        onCreate: _createDB,
-        onUpgrade: _onUpgrade,
+        version: 3,
+        onCreate: (db, version) async {
+          print('Creating new database...');
+          await _createDB(db, version);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            // Add the inventory table if upgrading from v1
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price REAL NOT NULL,
+                quantity REAL NOT NULL,
+                initialQuantity REAL,
+                shortcut TEXT,
+                createdAt TEXT NOT NULL
+              )
+            ''');
+            await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory(name)',
+            );
+            await db.execute(
+              'UPDATE inventory SET initialQuantity = quantity WHERE initialQuantity IS NULL',
+            );
+          }
+          if (oldVersion < 3) {
+            // Add shortcut column if upgrading from v2
+            await db.execute('ALTER TABLE inventory ADD COLUMN shortcut TEXT');
+          }
+        },
         onOpen: (db) async {
-          debugPrint('Database opened successfully');
+          print('Database opened successfully');
+          // Set journal mode using rawQuery
           await db.rawQuery('PRAGMA journal_mode=WAL');
+          // Verify table exists
           final tables = await db.rawQuery(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='bill_items'",
           );
-          debugPrint('Found ${tables.length} tables');
+          print('Found ${tables.length} tables');
         },
       );
 
       return _database!;
     } catch (e) {
-      debugPrint('Database initialization error: $e');
+      print('Database initialization error: $e');
       rethrow;
-    }
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // Add status column to bill_items table
-      await db.execute('''
-        ALTER TABLE bill_items 
-        ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'
-      ''');
-
-      // Update existing completed items
-      await db.execute('''
-        UPDATE bill_items 
-        SET status = 'completed' 
-        WHERE isDeleted = 1
-      ''');
     }
   }
 
@@ -68,7 +82,6 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         price REAL NOT NULL,
         quantity REAL NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
         createdAt TEXT NOT NULL,
         deletedAt TEXT NULL,
         updatedAt TEXT NULL,
@@ -95,9 +108,6 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_inventory_name ON inventory(name)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_bill_status ON bill_items(status)',
     );
   }
 

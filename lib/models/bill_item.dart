@@ -79,6 +79,6 @@ class BillItem {
   }
 
   static double calculateBillTotal(List<BillItem> items) {
-    return items.fold(0.0, (sum, item) => sum + item.total);
+    return items.fold(0, (sum, item) => sum + item.total);
   }
 }

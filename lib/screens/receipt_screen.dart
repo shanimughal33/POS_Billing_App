@@ -40,7 +40,7 @@ class ReceiptScreen extends StatelessWidget {
       await file.writeAsBytes(await pdf.save());
       await Share.shareFiles([file.path], text: 'Bill #$billNumber');
     } catch (e) {
-      debugPrint('Error sharing bill: $e');
+      print('Error sharing bill: $e');
     }
   }
 
@@ -59,48 +59,43 @@ class ReceiptScreen extends StatelessWidget {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        // Store Logo
         pw.Center(
           child: pw.Container(
-            width: 70,
-            height: 70,
+            width: 60,
+            height: 60,
             decoration: pw.BoxDecoration(
-              color: PdfColors.grey200,
-              borderRadius: pw.BorderRadius.circular(10),
+              color: PdfColors.grey300,
+              borderRadius: pw.BorderRadius.circular(8),
             ),
             child: pw.Center(
               child: pw.Icon(
                 pw.IconData(0xe3af),
-                size: 45,
+                size: 38,
                 color: PdfColors.black,
               ),
             ),
           ),
         ),
-        pw.SizedBox(height: 10),
-
-        // Store Name with modern font
+        pw.SizedBox(height: 8),
         pw.Center(
           child: pw.Text(
             'GROCERY STORE',
             style: pw.TextStyle(
               font: pw.Font.courier(),
-              fontSize: 32,
+              fontSize: 28,
               fontWeight: pw.FontWeight.bold,
-              letterSpacing: 2,
+              letterSpacing: 1.5,
               color: PdfColors.black,
             ),
           ),
         ),
-        pw.SizedBox(height: 4),
-
-        // Store Details with improved spacing
+        pw.SizedBox(height: 2),
         pw.Center(
           child: pw.Text(
             '123 Main Street, City',
             style: pw.TextStyle(
               font: pw.Font.courier(),
-              fontSize: 16,
+              fontSize: 15,
               color: PdfColors.grey800,
             ),
           ),
@@ -110,253 +105,212 @@ class ReceiptScreen extends StatelessWidget {
             'Tel: (123) 456-7890',
             style: pw.TextStyle(
               font: pw.Font.courier(),
-              fontSize: 16,
+              fontSize: 15,
               color: PdfColors.grey800,
             ),
           ),
         ),
+        pw.SizedBox(height: 8),
+        _asciiDividerPdf(),
         pw.SizedBox(height: 10),
-
-        // Fancy divider
-        _buildFancyDividerPdf(),
-        pw.SizedBox(height: 12),
-
-        // Bill details with improved layout
-        pw.Container(
-          padding: const pw.EdgeInsets.all(10),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey100,
-            borderRadius: pw.BorderRadius.circular(8),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Bill #: ${billNumber.toString().padLeft(6, '0')}',
-                    style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 16,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.black,
-                    ),
-                  ),
-                  pw.Text(
-                    _formatDate(dateTime),
-                    style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 14,
-                      color: PdfColors.black,
-                    ),
-                  ),
-                ],
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Bill #: ${billNumber.toString().padLeft(6, '0')}',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                color: PdfColors.black,
               ),
-              pw.SizedBox(height: 8),
-              pw.Row(
+            ),
+            pw.Text(
+              _formatDate(dateTime),
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                color: PdfColors.black,
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          children: [
+            pw.Text(
+              'Customer: ',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.black,
+              ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                customerName,
+                style: pw.TextStyle(
+                  font: pw.Font.courier(),
+                  fontSize: 15,
+                  color: PdfColors.black,
+                ),
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          children: [
+            pw.Text(
+              'Payment: ',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.black,
+              ),
+            ),
+            pw.Text(
+              paymentMethod,
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                color: PdfColors.black,
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 12),
+        _asciiDividerPdf(),
+        // Items Table
+        pw.Container(
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey50,
+            borderRadius: pw.BorderRadius.circular(6),
+            border: pw.Border.all(color: PdfColors.grey500, width: 1.2),
+          ),
+          child: pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey500, width: 1.2),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(2.5),
+              1: const pw.FlexColumnWidth(1.2),
+              2: const pw.FlexColumnWidth(2),
+            },
+            defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+            children: [
+              pw.TableRow(
+                decoration: pw.BoxDecoration(color: PdfColors.grey200),
                 children: [
-                  pw.Text(
-                    'Customer: ',
-                    style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 14,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.black,
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
                     ),
-                  ),
-                  pw.Expanded(
                     child: pw.Text(
-                      customerName,
+                      'ITEM',
                       style: pw.TextStyle(
                         font: pw.Font.courier(),
-                        fontSize: 14,
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
+                      ),
+                    ),
+                  ),
+                  pw.Center(
+                    child: pw.Text(
+                      'QTY',
+                      style: pw.TextStyle(
+                        font: pw.Font.courier(),
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
+                      ),
+                    ),
+                  ),
+                  pw.Center(
+                    child: pw.Text(
+                      'AMOUNT',
+                      style: pw.TextStyle(
+                        font: pw.Font.courier(),
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
                         color: PdfColors.black,
                       ),
                     ),
                   ),
                 ],
               ),
-              pw.SizedBox(height: 4),
-              pw.Row(
-                children: [
-                  pw.Text(
-                    'Payment: ',
-                    style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 14,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.black,
-                    ),
-                  ),
-                  pw.Text(
-                    paymentMethod,
-                    style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 14,
-                      color: PdfColors.black,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 12),
-
-        // Items table with improved design
-        pw.Container(
-          decoration: pw.BoxDecoration(
-            borderRadius: pw.BorderRadius.circular(8),
-            border: pw.Border.all(color: PdfColors.grey400),
-          ),
-          child: pw.Column(
-            children: [
-              // Table header
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(
-                  vertical: 8,
-                  horizontal: 10,
-                ),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.grey200,
-                  borderRadius: pw.BorderRadius.only(
-                    topLeft: pw.Radius.circular(8),
-                    topRight: pw.Radius.circular(8),
-                  ),
-                ),
-                child: pw.Row(
+              ...items.map(
+                (item) => pw.TableRow(
                   children: [
-                    pw.Expanded(
-                      flex: 4,
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 6,
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            item.name,
+                            style: pw.TextStyle(
+                              font: pw.Font.courier(),
+                              fontSize: 15,
+                              color: PdfColors.black,
+                            ),
+                          ),
+                          pw.SizedBox(height: 2),
+                          pw.Text(
+                            '@ Rs ${item.price.toStringAsFixed(0)} each',
+                            style: pw.TextStyle(
+                              font: pw.Font.courier(),
+                              fontSize: 15,
+                              color: PdfColors.grey800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.Center(
                       child: pw.Text(
-                        'ITEM',
+                        item.quantity.toStringAsFixed(0),
                         style: pw.TextStyle(
                           font: pw.Font.courier(),
                           fontSize: 14,
-                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.black,
                         ),
                       ),
                     ),
-                    pw.Expanded(
-                      flex: 1,
+                    pw.Center(
                       child: pw.Text(
-                        'QTY',
-                        textAlign: pw.TextAlign.center,
+                        'Rs ${item.total.toStringAsFixed(0)}',
                         style: pw.TextStyle(
                           font: pw.Font.courier(),
-                          fontSize: 14,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    pw.Expanded(
-                      flex: 2,
-                      child: pw.Text(
-                        'AMOUNT',
-                        textAlign: pw.TextAlign.right,
-                        style: pw.TextStyle(
-                          font: pw.Font.courier(),
-                          fontSize: 14,
-                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 15,
+                          color: PdfColors.black,
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-
-              // Table items
-              ...items.map(
-                (item) => pw.Container(
-                  padding: const pw.EdgeInsets.symmetric(
-                    vertical: 6,
-                    horizontal: 10,
-                  ),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border(
-                      bottom: pw.BorderSide(color: PdfColors.grey300),
-                    ),
-                  ),
-                  child: pw.Row(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Expanded(
-                        flex: 4,
-                        child: pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text(
-                              item.name,
-                              style: pw.TextStyle(
-                                font: pw.Font.courier(),
-                                fontSize: 12,
-                              ),
-                            ),
-                            pw.SizedBox(height: 2),
-                            pw.Text(
-                              'Rs ${item.price.toStringAsFixed(2)} each',
-                              style: pw.TextStyle(
-                                font: pw.Font.courier(),
-                                fontSize: 10,
-                                color: PdfColors.grey700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      pw.Expanded(
-                        flex: 1,
-                        child: pw.Text(
-                          item.quantity.toStringAsFixed(0),
-                          textAlign: pw.TextAlign.center,
-                          style: pw.TextStyle(
-                            font: pw.Font.courier(),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      pw.Expanded(
-                        flex: 2,
-                        child: pw.Text(
-                          'Rs ${item.total.toStringAsFixed(2)}',
-                          textAlign: pw.TextAlign.right,
-                          style: pw.TextStyle(
-                            font: pw.Font.courier(),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ),
-        pw.SizedBox(height: 12),
-
-        // Totals section with improved design
+        pw.SizedBox(height: 16),
+        pw.Container(height: 1.5, color: PdfColors.grey500),
+        pw.SizedBox(height: 10),
+        // Totals Section
         pw.Container(
-          padding: const pw.EdgeInsets.all(12),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey100,
-            borderRadius: pw.BorderRadius.circular(8),
-            border: pw.Border.all(color: PdfColors.grey400),
-          ),
+          color: PdfColors.grey100,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: pw.Column(
             children: [
-              _buildTotalRowPdf('Subtotal:', total),
-              _buildTotalRowPdf('Tax (16%):', total * 0.16),
-              _buildTotalRowPdf('Discount:', 0),
-              pw.Container(
-                margin: const pw.EdgeInsets.only(top: 8),
+              _buildTotalRowPdf('Subtotal:', total, isBold: false),
+              _buildTotalRowPdf('Tax (16%):', total * 0.16, isBold: false),
+              _buildTotalRowPdf('Discount:', 0, isBold: false),
+              pw.Padding(
                 padding: const pw.EdgeInsets.symmetric(vertical: 8),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border(
-                    top: pw.BorderSide(color: PdfColors.grey400),
-                  ),
-                ),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
@@ -364,16 +318,18 @@ class ReceiptScreen extends StatelessWidget {
                       'TOTAL',
                       style: pw.TextStyle(
                         font: pw.Font.courier(),
-                        fontSize: 20,
+                        fontSize: 21,
                         fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
                       ),
                     ),
                     pw.Text(
-                      'Rs ${(total * 1.16).toStringAsFixed(2)}',
+                      'Rs${(total * 1.16).toStringAsFixed(0)}',
                       style: pw.TextStyle(
                         font: pw.Font.courier(),
-                        fontSize: 20,
+                        fontSize: 21,
                         fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
                       ),
                     ),
                   ],
@@ -382,123 +338,236 @@ class ReceiptScreen extends StatelessWidget {
             ],
           ),
         ),
+        pw.SizedBox(height: 14),
+        _asciiDividerPdf(),
+        pw.SizedBox(height: 10),
+        // Payment Info
+        pw.Row(
+          children: [
+            pw.Text(
+              'Paid by: ',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.black,
+              ),
+            ),
+            pw.Text(
+              paymentMethod,
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 14,
+                color: PdfColors.black,
+              ),
+            ),
+          ],
+        ),
+        if (paymentMethod.toLowerCase().contains('card'))
+          pw.Text(
+            'Card: **** 1234',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 13,
+              color: PdfColors.grey600,
+            ),
+          ),
+        if (paymentMethod.toLowerCase() == 'cash')
+          pw.Text(
+            'Change Due: Rs 0',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 13,
+              color: PdfColors.grey600,
+            ),
+          ),
+        pw.SizedBox(height: 10),
+        _asciiDividerPdf(),
         pw.SizedBox(height: 16),
-
-        // Thank you message with improved design
+        // Thank You Stamp
         pw.Center(
           child: pw.Container(
-            padding: const pw.EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 10,
-            ),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 18, vertical: 6),
             decoration: pw.BoxDecoration(
               color: PdfColors.green50,
               border: pw.Border.all(color: PdfColors.green700, width: 2),
-              borderRadius: pw.BorderRadius.circular(10),
+              borderRadius: pw.BorderRadius.circular(8),
             ),
             child: pw.Text(
-              'THANK YOU FOR YOUR BUSINESS!',
+              'PAID - THANK YOU!',
               style: pw.TextStyle(
                 font: pw.Font.courier(),
-                fontSize: 16,
+                fontSize: 18,
                 fontWeight: pw.FontWeight.bold,
                 color: PdfColors.green800,
-                letterSpacing: 1,
+                letterSpacing: 2,
               ),
             ),
           ),
         ),
         pw.SizedBox(height: 16),
-
-        // Footer with improved design
-        pw.Container(
-          padding: const pw.EdgeInsets.symmetric(vertical: 10),
-          decoration: pw.BoxDecoration(
-            border: pw.Border(top: pw.BorderSide(color: PdfColors.grey400)),
-          ),
-          child: pw.Column(
-            children: [
-              pw.Text(
-                'Items once sold cannot be returned',
-                style: pw.TextStyle(
-                  font: pw.Font.courier(),
-                  fontSize: 12,
-                  color: PdfColors.grey700,
-                ),
-              ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                'For support: (123) 456-7890',
-                style: pw.TextStyle(
-                  font: pw.Font.courier(),
-                  fontSize: 12,
-                  color: PdfColors.grey700,
-                ),
-              ),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 10),
-
         // Barcode
         pw.Center(
           child: pw.BarcodeWidget(
             barcode: pw.Barcode.code128(),
             data: 'BILL${billNumber.toString().padLeft(6, '0')}',
-            width: 200,
-            height: 60,
+            width: 180,
+            height: 56,
             drawText: true,
-            textStyle: pw.TextStyle(font: pw.Font.courier(), fontSize: 12),
+            textStyle: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 14,
+              color: PdfColors.black,
+            ),
+            color: PdfColors.black,
+            backgroundColor: PdfColors.white,
           ),
         ),
-      ],
-    );
-  }
-
-  pw.Widget _buildFancyDividerPdf() {
-    return pw.Row(
-      children: [
-        pw.Expanded(child: pw.Container(height: 2, color: PdfColors.grey400)),
-        pw.Container(
-          margin: const pw.EdgeInsets.symmetric(horizontal: 10),
+        pw.SizedBox(height: 10),
+        pw.Center(
           child: pw.Text(
-            '✦',
+            'Scan for digital copy',
             style: pw.TextStyle(
               font: pw.Font.courier(),
-              fontSize: 14,
-              color: PdfColors.grey700,
+              fontSize: 13,
+              color: PdfColors.grey800,
             ),
           ),
         ),
-        pw.Expanded(child: pw.Container(height: 2, color: PdfColors.grey400)),
+        pw.SizedBox(height: 10),
+        _asciiDividerPdf(),
+        pw.SizedBox(height: 10),
+        // Signature line
+        pw.Row(
+          children: [
+            pw.Expanded(
+              child: pw.Container(height: 1, color: PdfColors.grey400),
+            ),
+            pw.SizedBox(width: 8),
+            pw.Text(
+              'Signature',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 12,
+                color: PdfColors.grey700,
+              ),
+            ),
+            pw.SizedBox(width: 8),
+            pw.Expanded(
+              child: pw.Container(height: 1, color: PdfColors.grey400),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 10),
+        // Footer
+        pw.Center(
+          child: pw.Text(
+            'Thank you for shopping with us!',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 15,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.black,
+            ),
+          ),
+        ),
+        pw.Center(
+          child: pw.Text(
+            'Items once sold cannot be returned.',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 15,
+              color: PdfColors.grey800,
+            ),
+          ),
+        ),
+        pw.Center(
+          child: pw.Text(
+            'For support: (123) 456-7890',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 15,
+              color: PdfColors.grey800,
+            ),
+          ),
+        ),
+        pw.Center(
+          child: pw.Text(
+            'Have a great day!',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 15,
+              color: PdfColors.grey800,
+            ),
+          ),
+        ),
+        pw.SizedBox(height: 10),
+        _asciiDividerPdf(),
+        pw.SizedBox(height: 6),
+        // Cut line
+        pw.Center(
+          child: pw.Text(
+            '------------------------------------------',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 13,
+              color: PdfColors.grey400,
+            ),
+          ),
+        ),
+        pw.Center(
+          child: pw.Text(
+            'cut here',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 10,
+              color: PdfColors.grey400,
+              fontStyle: pw.FontStyle.italic,
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  pw.Widget _buildTotalRowPdf(String label, double amount) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 4),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(
-            label,
-            style: pw.TextStyle(
-              font: pw.Font.courier(),
-              fontSize: 14,
-              color: PdfColors.grey800,
-            ),
-          ),
-          pw.Text(
-            'Rs ${amount.toStringAsFixed(2)}',
-            style: pw.TextStyle(
-              font: pw.Font.courier(),
-              fontSize: 14,
-              color: PdfColors.grey800,
-            ),
-          ),
-        ],
+  pw.Widget _asciiDividerPdf() {
+    return pw.Center(
+      child: pw.Text(
+        '------------------------------------------',
+        style: pw.TextStyle(
+          font: pw.Font.courier(),
+          fontSize: 13,
+          color: PdfColors.grey700,
+        ),
       ),
+    );
+  }
+
+  pw.Widget _buildTotalRowPdf(
+    String label,
+    double amount, {
+    bool isBold = false,
+  }) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(
+          label,
+          style: pw.TextStyle(
+            font: pw.Font.courier(),
+            fontSize: 14,
+            fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+        pw.Text(
+          'Rs${amount.toStringAsFixed(0)}',
+          style: pw.TextStyle(
+            font: pw.Font.courier(),
+            fontSize: 14,
+            fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+      ],
     );
   }
 
