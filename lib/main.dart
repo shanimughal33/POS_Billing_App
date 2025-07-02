@@ -1,8 +1,8 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:forward_billing_app/screens/inventory_screen.dart';
 import 'package:forward_billing_app/screens/home_screen.dart';
+import 'package:forward_billing_app/screens/inventory_screen.dart';
+import 'package:forward_billing_app/screens/Calculator.dart';
 import 'cubit/inventory_cubit.dart';
 import 'cubit/sales_cubit.dart';
 import 'repositories/inventory_repository.dart';
@@ -56,7 +56,7 @@ class MyApp extends StatelessWidget {
                   BlocProvider<SalesCubit>(
                     create: (_) =>
                         SalesCubit(context.read<InventoryCubit>().items),
-                    child: const CustomerBillScreen(),
+                    child: const CalculatorScreen(),
                   ),
               transitionDuration: const Duration(milliseconds: 300),
               reverseTransitionDuration: const Duration(milliseconds: 300),
@@ -100,7 +100,7 @@ class MyApp extends StatelessWidget {
             );
           }
         },
-        home: const InventoryScreen(),
+        home: const HomeScreen(),
       ),
     );
   }

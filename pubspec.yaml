@@ -1,4 +1,4 @@
-name: forward_billing_app
+name: "forward_billing_app"
 description: "A new Flutter project."
 publish_to: 'none'
 version: 0.1.0
@@ -19,6 +19,19 @@ dependencies:
   printing: ^5.11.1
   barcode_widget: ^2.0.4
   flutter_bloc: ^8.1.3
+  font_awesome_flutter: ^10.7.0
+  carousel_slider: ^5.0.0
+  animated_bottom_navigation_bar: ^1.2.0
+  flutter_slidable: ^3.0.0
+  intl: ^0.19.0
+  cached_network_image: ^3.4.1
+  
+  
+  
+
+
+  
+
 
 dev_dependencies:
   flutter_test:

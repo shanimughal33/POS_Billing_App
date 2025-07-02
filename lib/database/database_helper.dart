@@ -53,6 +53,25 @@ class DatabaseHelper {
             // Add shortcut column if upgrading from v2
             await db.execute('ALTER TABLE inventory ADD COLUMN shortcut TEXT');
           }
+          if (oldVersion < 4) {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                category TEXT NOT NULL,
+                balance REAL NOT NULL,
+                lastTransactionDate TEXT NOT NULL,
+                isDeleted INTEGER NOT NULL DEFAULT 0
+              )
+            ''');
+          }
+          if (oldVersion < 5) {
+            // Add isDeleted column to people if not present
+            await db.execute(
+              'ALTER TABLE people ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0',
+            );
+          }
         },
         onOpen: (db) async {
           print('Database opened successfully');
@@ -99,6 +118,19 @@ class DatabaseHelper {
         initialQuantity REAL,
         shortcut TEXT,
         createdAt TEXT NOT NULL
+      )
+    ''');
+
+    // Create people table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS people (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        category TEXT NOT NULL,
+        balance REAL NOT NULL,
+        lastTransactionDate TEXT NOT NULL,
+        isDeleted INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
