@@ -14,9 +14,6 @@ import '../models/bill.dart';
 import '../models/inventory_item.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import '../utils/app_theme.dart';
-import 'dart:ui'; // For BackdropFilter
-import 'package:google_fonts/google_fonts.dart'; // For modern fonts
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -73,52 +70,6 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   String _shortcutBuffer = '';
   Timer? _shortcutEntryTimer;
   static const Duration _shortcutEntryTimeout = Duration(milliseconds: 500);
-
-  // Add state for pressed button for animation
-  String? _pressedButton;
-
-  // Add shimmer effect for total
-  Widget _shimmerTotal(String value) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(seconds: 2),
-      curve: Curves.easeInOut,
-      builder: (context, t, child) {
-        return ShaderMask(
-          shaderCallback: (rect) {
-            return LinearGradient(
-              colors: [
-                Colors.white.withOpacity(0.7),
-                Colors.blue.withOpacity(0.7),
-                Colors.white.withOpacity(0.7),
-              ],
-              stops: [t - 0.2, t, t + 0.2],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              tileMode: TileMode.mirror,
-            ).createShader(rect);
-          },
-          child: child,
-          blendMode: BlendMode.srcATop,
-        );
-      },
-      child: Text(
-        value,
-        style: GoogleFonts.urbanist(
-          color: Colors.white,
-          fontSize: 15,
-          fontWeight: FontWeight.bold, // ensure bold
-          letterSpacing: 0.5,
-          shadows: [
-            Shadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
-          ],
-        ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.left,
-      ),
-    );
-  }
 
   @override
   void initState() {
@@ -316,40 +267,41 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   void _handleOperation(String operation) {
-    if (isEditingQuantity) {
-      if (quantityValue.isEmpty && operation != '-') {
-        return; // Prevent leading operators other than minus
+    if (operation == '*' && !isEditingQuantity) {
+      // Evaluate current expression before switching
+      if (priceValue.isNotEmpty) {
+        try {
+          final result = _parseExpression(priceValue);
+          priceValue = result;
+          priceController.text = result;
+        } catch (e) {
+          debugPrint('Error evaluating expression: $e');
+        }
       }
-      if (RegExp(r'[+\-*/%]$').hasMatch(quantityValue.trim())) {
-        return; // Prevent consecutive operators
-      }
-      quantityValue = '${quantityValue.trim()} $operation ';
-      quantityController.text = quantityValue;
-    } else {
-      if (priceValue.isEmpty && operation != '-') {
-        return;
-      }
-      if (RegExp(r'[+\-*/%]$').hasMatch(priceValue.trim())) {
-        return;
-      }
-      if (operation == '*') {
-        _showCalculator(true);
-        return;
-      }
-      priceValue = '${priceValue.trim()} $operation ';
-      priceController.text = priceValue;
+      _showCalculator(true);
+      return;
     }
+
+    setState(() {
+      if (isEditingQuantity) {
+        String currentText = quantityController.text;
+        if (!RegExp(r'[+\-*/%]$').hasMatch(currentText)) {
+          quantityValue = '$currentText $operation';
+          quantityController.text = quantityValue;
+        }
+      } else {
+        String currentText = priceController.text;
+        if (!RegExp(r'[+\-*/%]$').hasMatch(currentText)) {
+          priceValue = '$currentText $operation';
+          priceController.text = priceValue;
+        }
+      }
+    });
   }
 
   String _parseExpression(String input) {
     try {
       if (input.isEmpty) return '';
-      input = input.trim();
-
-      // Prevent division by zero
-      if (input.contains('/ 0')) {
-        return 'Error';
-      }
 
       // Handle percentage calculations
       if (input.contains('%')) {
@@ -380,7 +332,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       // Format result without decimal places
       return result.toStringAsFixed(0);
     } catch (e) {
-      return 'Error';
+      // Return original input if parsing fails
+      return input;
     }
   }
 
@@ -566,61 +519,58 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   // In addBillItem, after a successful add, clear price/qty and set itemNameController.text to _getDefaultItemName()
   Future<void> addBillItem() async {
-    final validationError = validateInputs();
-    if (validationError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(validationError), backgroundColor: Colors.red),
-      );
-      return;
-    }
-
-    final priceResult = _parseExpression(priceValue);
-    final quantityResult = _parseExpression(quantityValue);
-
-    if (priceResult == 'Error' || quantityResult == 'Error') {
+    try {
+      final error = validateInputs();
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error), backgroundColor: Colors.red),
+        );
+        return;
+      }
+      double finalPrice = double.parse(_parseExpression(priceValue));
+      double finalQuantity = double.parse(_parseExpression(quantityValue));
+      if (_editingItem != null) {
+        final updatedItem = BillItem(
+          id: _editingItem!.id,
+          serialNo: _editingItem!.serialNo,
+          name: itemNameController.text.trim().isNotEmpty
+              ? itemNameController.text.trim()
+              : _editingItem!.name,
+          price: finalPrice,
+          quantity: finalQuantity,
+        );
+        await _billRepository.updateBillItem(updatedItem);
+      } else {
+        String itemName = itemNameController.text.trim();
+        if (itemName.isEmpty) {
+          itemName = _getDefaultItemName();
+        }
+        final newItem = BillItem(
+          serialNo: 0,
+          name: itemName,
+          price: finalPrice,
+          quantity: finalQuantity,
+        );
+        await context.read<SalesCubit>().addBillItem(newItem);
+      }
+      // Clear price and quantity fields, set item name to next default
+      priceController.clear();
+      quantityController.clear();
+      priceValue = '';
+      quantityValue = '';
+      itemNameController.text = _getDefaultItemName();
+      _shortcutBuffer = '';
+      setState(() {});
+    } catch (e) {
+      debugPrint('Error managing item: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Invalid calculation'),
+          content: Text('Failed to save item'),
           backgroundColor: Colors.red,
         ),
       );
-      return;
     }
-
-    double finalPrice = double.parse(priceResult);
-    double finalQuantity = double.parse(quantityResult);
-    if (_editingItem != null) {
-      final updatedItem = BillItem(
-        id: _editingItem!.id,
-        serialNo: _editingItem!.serialNo,
-        name: itemNameController.text.trim().isNotEmpty
-            ? itemNameController.text.trim()
-            : _editingItem!.name,
-        price: finalPrice,
-        quantity: finalQuantity,
-      );
-      await _billRepository.updateBillItem(updatedItem);
-    } else {
-      String itemName = itemNameController.text.trim();
-      if (itemName.isEmpty) {
-        itemName = _getDefaultItemName();
-      }
-      final newItem = BillItem(
-        serialNo: 0,
-        name: itemName,
-        price: finalPrice,
-        quantity: finalQuantity,
-      );
-      await context.read<SalesCubit>().addBillItem(newItem);
-    }
-    // Clear price and quantity fields, set item name to next default
-    priceController.clear();
-    quantityController.clear();
-    priceValue = '';
-    quantityValue = '';
-    itemNameController.text = _getDefaultItemName();
-    _shortcutBuffer = '';
-    setState(() {});
   }
 
   // Update toggle search method
@@ -806,26 +756,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
             appBar: PreferredSize(
               preferredSize: const Size.fromHeight(87),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(5, 6, 0, 6),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.white, Colors.blue.shade50],
-                  ),
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(24),
-                    bottomRight: Radius.circular(24),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0xFF1976D2).withOpacity(0.13),
-                      blurRadius: 16,
-                      offset: Offset(0, 6),
-                    ),
-                  ],
-                ),
-
+                padding: const EdgeInsets.fromLTRB(5, 10, 0, 10),
+                color: const Color(0xFF128C7E),
+                // Green background
                 child: SafeArea(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -834,7 +767,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       IconButton(
                         icon: const Icon(
                           Icons.arrow_back_ios,
-                          color: Color.fromARGB(255, 6, 61, 107),
+                          color: Colors.white,
                           size: 16,
                         ),
                         onPressed: () {
@@ -858,15 +791,19 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                 horizontal: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: Colors.green.shade50,
                                 borderRadius: BorderRadius.circular(8),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Color(0xFF0A2342).withOpacity(0.13),
-                                    blurRadius: 16,
-                                    offset: Offset(0, 6),
+                                    color: Colors.black.withOpacity(0.06),
+                                    blurRadius: 6,
+                                    offset: Offset(0, 2),
                                   ),
                                 ],
+                                border: Border.all(
+                                  color: Color(0xFF1E8858).withOpacity(0.18),
+                                  width: 1,
+                                ),
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
@@ -877,13 +814,13 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.blue,
+                                      color: Color(0xFF1E8858),
                                     ),
                                   ),
                                   icon: const Icon(
                                     Icons.keyboard_arrow_down,
                                     size: 20,
-                                    color: Colors.blue,
+                                    color: Color(0xFF1E8858),
                                   ),
                                   dropdownColor: Colors.white,
                                   onChanged: (String? newValue) {
@@ -906,7 +843,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                                         .toUpperCase()
                                                   : '',
                                               style: const TextStyle(
-                                                color: Colors.blue,
+                                                color: Color(0xFF1E8858),
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                               ),
@@ -917,7 +854,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                             customer.name,
                                             style: const TextStyle(
                                               fontSize: 13,
-                                              color: Colors.blue,
+                                              color: Color(0xFF1E8858),
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
@@ -932,8 +869,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                         children: [
                                           CircleAvatar(
                                             radius: 12,
-                                            backgroundColor: (Colors.blue)
-                                                .withOpacity(0.13),
+                                            backgroundColor: Color(
+                                              0xFF1E8858,
+                                            ).withOpacity(0.13),
                                             child: Text(
                                               customer.name.isNotEmpty
                                                   ? customer.name[0]
@@ -951,7 +889,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                             customer.name,
                                             style: const TextStyle(
                                               fontSize: 13,
-                                              color: Colors.blue,
+                                              color: Color(0xFF1E8858),
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
@@ -966,21 +904,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                             // Payment Method Dropdown
                             Container(
                               height: 30,
-                              width: 140,
-                              margin: const EdgeInsets.only(left: 0),
+                              width: 115,
+                              margin: const EdgeInsets.only(left: 10),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(6),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Color(0xFF0A2342).withOpacity(0.13),
-                                    blurRadius: 16,
-                                    offset: Offset(0, 6),
-                                  ),
-                                ],
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
@@ -988,7 +919,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   value: _selectedPaymentMethod,
                                   icon: const Icon(
                                     Icons.keyboard_arrow_down,
-                                    color: Colors.blue,
+                                    color: Color(0xFF1E8858),
                                   ),
                                   onChanged: (String? newValue) {
                                     setState(() {
@@ -1003,7 +934,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                           value,
                                           style: const TextStyle(
                                             fontSize: 13,
-                                            color: Colors.blue,
+                                            color: Color(0xFF1E8858),
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -1022,58 +953,42 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                         flex: 3,
                         child: Container(
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0xFF1976D2), Color(0xFF2196F3)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Color(0xFF0A2342).withOpacity(0.13),
-                                blurRadius: 16,
-                                offset: Offset(0, 6),
-                              ),
-                            ],
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
                           margin: const EdgeInsets.only(right: 10),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Text(
                                     'Rs ',
-                                    style: GoogleFonts.urbanist(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight:
-                                          FontWeight.bold, // ensure bold
-                                      letterSpacing: 0.5,
+                                    style: const TextStyle(
+                                      color: Color(0xFF1E8858),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  Flexible(
-                                    child: _shimmerTotal(
-                                      totalAmount(context).toStringAsFixed(2),
+                                  Text(
+                                    totalAmount(context).toStringAsFixed(2),
+                                    style: const TextStyle(
+                                      color: Color(0xFF1E8858),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Discount:0%',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 11, // slightly reduced
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Party Discount:0%',
+                                style: TextStyle(
+                                  color: Color(0xFF1E8858),
+                                  fontSize: 12,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
@@ -1092,28 +1007,18 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     children: [
                       // Header row
                       Container(
-                        margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                        margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Color(0xFF64B5F6), // lighter blue at top
-                              Color(0xFF1976D2), // deeper blue at bottom
-                            ],
+                          color: Colors.grey.shade50,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(8),
+                            topRight: Radius.circular(8),
                           ),
-                          borderRadius: BorderRadius.zero,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Color(0xFF1976D2).withOpacity(0.08),
-                              blurRadius: 8,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
+                          border: Border.all(color: Colors.grey.shade200),
                         ),
                         child: Row(
                           children: [
@@ -1125,7 +1030,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.white,
+                                  color: Colors.grey.shade800,
                                 ),
                               ),
                             ),
@@ -1138,7 +1043,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.white,
+                                  color: Colors.grey.shade800,
                                 ),
                               ),
                             ),
@@ -1151,7 +1056,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.white,
+                                  color: Colors.grey.shade800,
                                 ),
                               ),
                             ),
@@ -1164,7 +1069,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.white,
+                                  color: Colors.grey.shade800,
                                 ),
                               ),
                             ),
@@ -1174,18 +1079,20 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       // Cart list
                       Expanded(
                         child: Container(
-                          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: const BorderRadius.only(
-                              bottomLeft: Radius.circular(18),
-                              bottomRight: Radius.circular(18),
+                              bottomLeft: Radius.circular(8),
+                              bottomRight: Radius.circular(8),
                             ),
+                            border: Border.all(color: Colors.grey.shade200),
                             boxShadow: [
                               BoxShadow(
-                                color: Color(0xFF1976D2).withOpacity(0.04),
-                                blurRadius: 8,
-                                offset: Offset(0, 2),
+                                color: Colors.grey.shade100,
+                                spreadRadius: 1,
+                                blurRadius: 3,
+                                offset: const Offset(0, 1),
                               ),
                             ],
                           ),
@@ -1203,348 +1110,250 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     // Input fields row
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12.0,
-                        vertical: 0.0,
+                        horizontal: 8.0,
+                        vertical: 3.0,
                       ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeInOut,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(18),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.blue.withOpacity(0.10),
-                                  blurRadius: 16,
-                                  offset: Offset(0, 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Container(
+                              height: 47,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.shade300,
+                                    spreadRadius: 2,
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: TextField(
+                                controller: itemNameController,
+                                keyboardType: TextInputType.text,
+                                decoration: InputDecoration(
+                                  hintText: _getDefaultItemName(),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
                                 ),
-                              ],
-                              border: Border.all(
-                                color: Colors.blue.withOpacity(0.08),
                               ),
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: Container(
-                                    height: 47,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
-                                        ),
-                                      ],
-                                    ),
-                                    child: TextField(
-                                      controller: itemNameController,
-                                      keyboardType: TextInputType.text,
-                                      decoration: InputDecoration(
-                                        hintText: _getDefaultItemName(),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 14,
-                                            ),
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                      ),
-                                    ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            flex: 1,
+                            child: Container(
+                              height: 47,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.shade300,
+                                    spreadRadius: 2,
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 3),
                                   ),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  flex: 1,
-                                  child: Container(
-                                    height: 47,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
-                                        ),
-                                      ],
-                                    ),
-                                    child: TextField(
-                                      readOnly: true,
-                                      controller: priceController,
-                                      focusNode: priceFocus,
-                                      onTap: () => _showCalculator(false),
-                                      cursorWidth: 2,
-                                      cursorHeight: 24,
-                                      cursorColor: Colors.blue,
-                                      showCursor: true,
-                                      style: const TextStyle(fontSize: 16),
-                                      decoration: InputDecoration(
-                                        hintText: 'eg: 100',
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 14,
-                                            ),
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                      ),
-                                    ),
+                                ],
+                              ),
+                              child: TextField(
+                                readOnly: true,
+                                controller: priceController,
+                                focusNode: priceFocus,
+                                onTap: () => _showCalculator(false),
+                                cursorWidth: 2,
+                                cursorHeight: 24,
+                                cursorColor: Colors.blue,
+                                showCursor: true,
+                                style: const TextStyle(fontSize: 16),
+                                decoration: InputDecoration(
+                                  hintText: 'eg: 100',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide.none,
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  flex: 1,
-                                  child: Container(
-                                    height: 47,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
-                                        ),
-                                      ],
-                                    ),
-                                    child: TextField(
-                                      readOnly: true,
-                                      controller: quantityController,
-                                      focusNode: quantityFocus,
-                                      onTap: () => _showCalculator(true),
-                                      cursorWidth: 2,
-                                      cursorHeight: 24,
-                                      cursorColor: Colors.blue,
-                                      showCursor: true,
-                                      textAlign: TextAlign.left,
-                                      style: const TextStyle(fontSize: 16),
-                                      decoration: InputDecoration(
-                                        hintText: 'eg: 2',
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 14,
-                                            ),
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                      ),
-                                    ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 14,
                                   ),
+                                  filled: true,
+                                  fillColor: Colors.white,
                                 ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            flex: 1,
+                            child: Container(
+                              height: 47,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.grey.shade300,
+                                    spreadRadius: 2,
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: TextField(
+                                readOnly: true,
+                                controller: quantityController,
+                                focusNode: quantityFocus,
+                                onTap: () => _showCalculator(true),
+                                cursorWidth: 2,
+                                cursorHeight: 24,
+                                cursorColor: Colors.blue,
+                                showCursor: true,
+                                textAlign: TextAlign.left,
+                                style: const TextStyle(fontSize: 16),
+                                decoration: InputDecoration(
+                                  hintText: 'eg: 2',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.7),
-                              borderRadius: BorderRadius.circular(6),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.blue.withOpacity(0.08),
-                                  blurRadius: 16,
-                                  offset: Offset(0, 4),
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // First 5 rows using GridView
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: 20,
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 4,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                  childAspectRatio:
+                                      1.7, // Wider but still tall enough
                                 ),
-                              ],
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                GridView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: 20,
-                                  gridDelegate:
-                                      const SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: 4,
-                                        crossAxisSpacing: 6,
-                                        mainAxisSpacing: 6,
-                                        childAspectRatio:
-                                            1.7, // Wider but still tall enough
-                                      ),
-                                  itemBuilder: (context, index) {
-                                    final List<String> buttonTexts = [
-                                      'A',
-                                      'B',
-                                      'C',
-                                      'D',
-                                      'Del',
-                                      'AC',
-                                      '%',
-                                      '÷',
-                                      '7',
-                                      '8',
-                                      '9',
-                                      '*',
-                                      '4',
-                                      '5',
-                                      '6',
-                                      '-',
-                                      '1',
-                                      '2',
-                                      '3',
-                                      '+',
-                                    ];
-                                    final String buttonText =
-                                        buttonTexts[index];
+                            itemBuilder: (context, index) {
+                              final List<String> buttonTexts = [
+                                'A',
+                                'B',
+                                'C',
+                                'D',
+                                'Del',
+                                'AC',
+                                '%',
+                                '÷',
+                                '7',
+                                '8',
+                                '9',
+                                '*',
+                                '4',
+                                '5',
+                                '6',
+                                '-',
+                                '1',
+                                '2',
+                                '3',
+                                '+',
+                              ];
+                              final String buttonText = buttonTexts[index];
 
-                                    // Add visual feedback for pending shortcuts
-                                    Color bgColor = _getButtonColor(buttonText);
-                                    if (_pendingShortcut != null &&
-                                        buttonText == _pendingShortcut) {
-                                      bgColor = Colors
-                                          .green
-                                          .shade700; // Highlight active shortcut button
-                                    }
+                              // Add visual feedback for pending shortcuts
+                              Color bgColor = _getButtonColor(buttonText);
+                              if (_pendingShortcut != null &&
+                                  buttonText == _pendingShortcut) {
+                                bgColor = Colors
+                                    .green
+                                    .shade700; // Highlight active shortcut button
+                              }
 
-                                    return _buildCalculatorButton(
-                                      buttonText,
-                                      bgColor,
-                                      _getTextColor(buttonText),
-                                    );
-                                  },
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Last row with 3 buttons (., 0, Enter)
-                                Row(
-                                  children: [
-                                    SizedBox(
-                                      height: 50,
-                                      width: 75,
-                                      child: _buildCalculatorButton(
-                                        '.',
-                                        Colors.grey.shade200,
-                                        Colors.white, // Changed to white
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    SizedBox(
-                                      height: 50,
-                                      width: 75,
-                                      child: _buildCalculatorButton(
-                                        '0',
-                                        const Color(0xFFEEEEEE), // Grey for 0
-                                        Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: MouseRegion(
-                                        onEnter: (_) => setState(
-                                          () => _pressedButton = 'Enter',
-                                        ),
-                                        onExit: (_) => setState(
-                                          () => _pressedButton = null,
-                                        ),
-                                        child: AnimatedContainer(
-                                          duration: const Duration(
-                                            milliseconds: 120,
-                                          ),
-                                          curve: Curves.easeInOut,
-                                          decoration: BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Color(0xFF1976D2),
-                                                Color(0xFF2196F3),
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            boxShadow: [
-                                              if (_pressedButton == 'Enter')
-                                                BoxShadow(
-                                                  color: Colors.blueAccent
-                                                      .withOpacity(0.4),
-                                                  blurRadius: 18,
-                                                  spreadRadius: 2,
-                                                  offset: Offset(0, 0),
-                                                ),
-                                            ],
-                                          ),
-                                          child: ElevatedButton(
-                                            onPressed: addBillItem,
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor:
-                                                  Colors.transparent,
-                                              shadowColor: Colors.transparent,
-                                              elevation: 0,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    vertical: 10,
-                                                  ),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(16),
-                                              ),
-                                            ),
-                                            child: const Text(
-                                              'Enter',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                                letterSpacing: 1.1,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                              return _buildCalculatorButton(
+                                buttonText,
+                                bgColor,
+                                _getTextColor(buttonText),
+                              );
+                            },
                           ),
-                        ),
+
+                          const SizedBox(height: 10),
+
+                          // Last row with 3 buttons (., 0, Enter)
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 50,
+                                width: 75,
+                                child: _buildCalculatorButton(
+                                  '.',
+                                  Colors.grey.shade200,
+                                  Colors.black,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                height: 50,
+                                width: 75,
+                                child: _buildCalculatorButton(
+                                  '0',
+                                  const Color(0xFFFFEB3B),
+                                  Colors.black,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                height: 50,
+                                width: 166,
+                                child: ElevatedButton(
+                                  onPressed: addBillItem,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green.shade600,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    elevation: 4,
+                                    shadowColor: Colors.black38,
+                                  ),
+                                  child: const Text(
+                                    'Enter',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1552,155 +1361,130 @@ class _CalculatorScreenState extends State<CalculatorScreen>
               ],
             ),
 
-            bottomNavigationBar: Container(
+            bottomNavigationBar: BottomAppBar(
+              elevation: 15,
+              color: Color(0xFF128C7E),
               height: 60,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF1976D2), Color(0xFF2196F3)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(22),
-                  topRight: Radius.circular(22),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0xFF1976D2).withOpacity(0.13),
-                    blurRadius: 16,
-                    offset: Offset(0, -6),
-                  ),
-                ],
-              ),
-              child: BottomAppBar(
-                elevation: 0,
-                color: Colors.white, // Use transparent to show gradient
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 2,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Search toggle button
-                          Container(
-                            margin: const EdgeInsets.only(right: 4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Search toggle button
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            icon: Icon(
+                              _isSearchVisible ? Icons.close : Icons.search,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            onPressed: _toggleSearch,
+                          ),
+                        ),
+                        // Search field with animation
+                        SizeTransition(
+                          sizeFactor:
+                              _searchAnimation ??
+                              const AlwaysStoppedAnimation(0.0),
+                          axis: Axis.horizontal,
+                          child: Container(
+                            width: 140, // Increased width
+                            height: 40,
+                            margin: const EdgeInsets.only(right: 2),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.grey.shade200,
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 40,
-                                minHeight: 40,
-                              ),
-                              icon: Icon(
-                                _isSearchVisible ? Icons.close : Icons.search,
-                                color: Colors.blue,
-                                size: 22,
-                              ),
-                              onPressed: _toggleSearch,
-                            ),
-                          ),
-                          // Search field with animation
-                          SizeTransition(
-                            sizeFactor:
-                                _searchAnimation ??
-                                const AlwaysStoppedAnimation(0.0),
-                            axis: Axis.horizontal,
-                            child: Container(
-                              width: 140, // Increased width
-                              height: 40,
-                              margin: const EdgeInsets.only(right: 2),
-                              decoration: BoxDecoration(
-                                color: Colors
-                                    .blue
-                                    .shade50, // blue 50 as inner color
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Color(0xFF0A2342).withOpacity(0.13),
-                                    blurRadius: 16,
-                                    offset: Offset(0, 6),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _searchController,
-                                      onChanged: _handleSearch,
-                                      decoration: InputDecoration(
-                                        hintText: "Search items...",
-                                        hintStyle: TextStyle(
-                                          color: Colors.grey.shade600,
-                                          fontSize: 13,
-                                        ),
-                                        border: InputBorder.none,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 10,
-                                            ),
-                                        isDense: true,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _searchController,
+                                    onChanged: _handleSearch,
+                                    decoration: InputDecoration(
+                                      hintText: "Search items...",
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 13,
                                       ),
+                                      border: InputBorder.none,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                      isDense: true,
                                     ),
                                   ),
-                                  if (_searchController.text.isNotEmpty)
-                                    SizedBox(
-                                      width: 32,
-                                      height: 32,
-                                      child: IconButton(
-                                        icon: Icon(
-                                          Icons.close,
-                                          size: 18,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          _handleSearch('');
-                                        },
-                                        padding: EdgeInsets.zero,
+                                ),
+                                if (_searchController.text.isNotEmpty)
+                                  SizedBox(
+                                    width: 32,
+                                    height: 32,
+                                    child: IconButton(
+                                      icon: Icon(
+                                        Icons.close,
+                                        size: 18,
+                                        color: Colors.grey.shade600,
                                       ),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        _handleSearch('');
+                                      },
+                                      padding: EdgeInsets.zero,
                                     ),
-                                ],
-                              ),
+                                  ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: _handleCreateBill,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.blue,
-                          elevation: 5,
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ), // Reduced padding
-                          minimumSize: Size(0, 32), // Reduced minimum height
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
                         ),
-                        icon: Icon(
-                          Icons.receipt_long,
-                          size: 18,
-                        ), // Reduced icon size
-                        label: Text(
-                          "Create Bill",
-                          style: TextStyle(fontSize: 13), // Reduced font size
+                      ],
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _handleCreateBill,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.green,
+                        elevation: 5,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ), // Reduced padding
+                        minimumSize: Size(0, 32), // Reduced minimum height
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
                         ),
                       ),
-                    ],
-                  ),
+                      icon: Icon(
+                        Icons.receipt_long,
+                        size: 18,
+                      ), // Reduced icon size
+                      label: Text(
+                        "Create Bill",
+                        style: TextStyle(fontSize: 13), // Reduced font size
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1715,7 +1499,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   // Calculator button builder
   Widget _buildCalculatorButton(String label, Color bgColor, Color textColor) {
-    final bool isOperator = ['+', '-', '*', '÷', '%'].contains(label);
+    final bool isOperator = ['+', '-', '*', '÷', '%', '.'].contains(label);
     final bool isShortcutKey = ['A', 'B', 'C', 'D'].contains(label);
     final bool isNumber = RegExp(r'^[0-9]$').hasMatch(label);
     final bool isActiveShortcut =
@@ -1727,77 +1511,34 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         label == _shortcutBuffer[_shortcutBuffer.length - 1];
 
     // Highlight shortcut and number buttons during shortcut entry
-    Color effectiveBg = bgColor;
-    Color effectiveText = textColor;
     if (_shortcutBuffer.isNotEmpty) {
       if (isShortcutKey && isActiveShortcut) {
-        effectiveBg = Colors.blue.shade700; // vibrant blue for pressed shortcut
-        effectiveText = Colors.white;
+        bgColor = Colors.green.shade700;
+        textColor = Colors.white;
       } else if (isNumber && isActiveNumber) {
-        effectiveBg = Colors.blue.shade100;
+        bgColor = Colors.green.shade100;
       } else if (isShortcutKey || isNumber) {
-        effectiveBg = Colors.grey.shade300;
+        bgColor = Colors.grey.shade300;
       }
     }
 
-    // Use operator gradient for operator and AC buttons
-    BoxDecoration? customGradient;
-    final bool isDot = label == '.';
-    if (isOperator || label == 'AC' || isDot) {
-      customGradient = const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF1976D2), Color(0xFF64B5F6)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.all(Radius.circular(16)),
-      );
-      effectiveBg = Colors.transparent;
-    }
-
-    return GestureDetector(
-      onTap: () => _onCalculatorButtonPressed(label), // <-- Add this line
-      onTapDown: (_) => setState(() => _pressedButton = label),
-      onTapUp: (_) => setState(() => _pressedButton = null),
-      onTapCancel: () => setState(() => _pressedButton = null),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 90),
-        curve: Curves.easeOut,
-        transform: (_pressedButton == label)
-            ? (Matrix4.identity()..scale(0.96))
-            : Matrix4.identity(),
-        decoration:
-            customGradient ??
-            BoxDecoration(
-              color: effectiveBg.withOpacity(
-                _pressedButton == label ? 0.85 : 1.0,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                if (_pressedButton != label)
-                  BoxShadow(
-                    color: Colors.blue.withOpacity(0.08),
-                    blurRadius: 8,
-                    offset: Offset(0, 2),
-                  ),
-              ],
-            ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: isOperator ? 22 : 16,
-              fontWeight: FontWeight.bold,
-              color: effectiveText,
-              shadows: [
-                Shadow(
-                  color: Colors.white.withOpacity(0.2),
-                  blurRadius: 2,
-                  offset: Offset(0, 1),
-                ),
-              ],
-            ),
-          ),
+    return ElevatedButton(
+      onPressed: () => _onCalculatorButtonPressed(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: bgColor,
+        foregroundColor: textColor,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: isActiveShortcut || isActiveNumber ? 8 : 4,
+        shadowColor: isActiveShortcut ? Colors.green : Colors.black38,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: isOperator ? 20 : 14,
+          fontWeight: isActiveShortcut || isActiveNumber || isOperator
+              ? FontWeight.w600
+              : FontWeight.w500,
         ),
       ),
     );
@@ -1808,22 +1549,22 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_bag_outlined, size: 36, color: Colors.grey[400]),
-          const SizedBox(height: 12),
+          Icon(Icons.shopping_bag_outlined, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 10),
           const Text(
             'Your cart is empty',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 18,
               color: Colors.grey,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           Text(
             'Add items to create a bill',
             style: TextStyle(
-              fontSize: 13,
-              color: Colors.blue,
+              fontSize: 16,
+              color: Color(0xFF128C7E),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1949,11 +1690,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1976D2).withOpacity(0.13),
+                      color: Colors.teal.shade50,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: const Color(0xFF1976D2).withOpacity(0.25),
-                      ),
+                      border: Border.all(color: Colors.teal.shade100),
                     ),
                     child: Text(
                       '${item.price.toStringAsFixed(0)} × ${item.quantity.toStringAsFixed(0)}',
@@ -2201,33 +1940,19 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
 /// Determines button background color
 Color _getButtonColor(String label) {
-  // Updated palette per user request
-  if (["A", "B", "C", "D"].contains(label))
-    return const Color(0xFFBBDEFB); // Light blue for shortcuts
-  if (label == "Del")
-    return const Color(0xFFD32F2F); // Medium strong red for delete
-  if (label == "AC")
-    return Colors.transparent; // Use gradient for AC, handled in builder
-  if (int.tryParse(label) != null)
-    return const Color(0xFFEEEEEE); // Grey for digits
-  if (["+", "-", "*", "÷", "%"].contains(label)) {
-    return const Color(0xFFBBDEFB); // Light blue for operators
+  if (['A', 'B', 'C', 'D'].contains(label)) return const Color(0xFF4CAF50);
+  if (label == 'Del') return const Color(0xFFEF9A9A);
+  if (label == 'AC') return Colors.grey.shade300;
+  if (int.tryParse(label) != null) return const Color(0xFFFFEB3B);
+  if (['+', '-', 'x', '÷', '%'].contains(label)) {
+    return Colors.grey.shade300;
   }
-  if (label == ".") return const Color(0xFF1976D2); // Blue for dot
-  return const Color(0xFFE3F2FD); // Default very light blue
+  return Colors.grey.shade200;
 }
 
 /// Determines text color
 Color _getTextColor(String label) {
-  if (["A", "B", "C", "D"].contains(label))
-    return const Color(0xFF1976D2); // Blue text for shortcuts
-  if (["Del"].contains(label)) return Colors.white;
-  if (["AC"].contains(label)) return Colors.white; // White for AC
-  if (["+", "-", "*", "÷", "%"].contains(label))
-    return Colors.white; // White text for operators
-  if (int.tryParse(label) != null) return Colors.black87; // Black for digits
-  if (label == ".") return Colors.white; // White for dot
-  return const Color(0xFF1976D2);
+  return ['A', 'B', 'C', 'D'].contains(label) ? Colors.white : Colors.black87;
 }
 
 // --- Refactored Cart List Widget ---
@@ -2273,22 +1998,22 @@ class CartListView extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_bag_outlined, size: 36, color: Colors.grey[400]),
-          const SizedBox(height: 12),
+          Icon(Icons.shopping_bag_outlined, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 10),
           const Text(
             'Your cart is empty',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 18,
               color: Colors.grey,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           Text(
             'Add items to create a bill',
             style: TextStyle(
-              fontSize: 13,
-              color: Colors.blue,
+              fontSize: 16,
+              color: Color(0xFF128C7E),
               fontWeight: FontWeight.w500,
             ),
           ),
