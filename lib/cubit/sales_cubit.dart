@@ -33,14 +33,25 @@ class SalesCubit extends Cubit<SalesState> {
 
   final List<BillItem> _items = [];
 
-  List<BillItem> get items => List.unmodifiable(_items);
+  List<BillItem> get items =>
+      List.unmodifiable(_items.where((item) => !_isSold(item)));
+
+  bool _isSold(BillItem item) {
+    // Check if the item exists in inventory and is marked as sold
+    final matches = inventory.where(
+      (inv) => inv.name.trim().toLowerCase() == item.name.trim().toLowerCase(),
+    );
+    return matches.isNotEmpty && matches.first.isSold == true;
+  }
 
   Future<void> loadSalesFromDb() async {
     try {
       final dbItems = await billRepository.getAllBillItems();
       _items.clear();
       _items.addAll(dbItems);
-      if (!isClosed) emit(SalesUpdated(List.from(_items)));
+      if (!isClosed) {
+        emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+      }
     } catch (e) {
       if (!isClosed) emit(SalesError('Failed to load sales items: $e'));
     }
@@ -50,8 +61,9 @@ class SalesCubit extends Cubit<SalesState> {
     final normalized = shortcut.trim().toUpperCase();
     final result = ShortcutValidator.parseShortcut(normalized);
     if (!result.isValid) {
-      if (!isClosed)
+      if (!isClosed) {
         emit(SalesError(result.error ?? 'Invalid shortcut format'));
+      }
       return;
     }
 
@@ -70,8 +82,9 @@ class SalesCubit extends Cubit<SalesState> {
       return;
     }
 
-    if (!isClosed)
+    if (!isClosed) {
       emit(SalesError('No inventory item found for shortcut $shortcut'));
+    }
   }
 
   Future<void> _addInventoryItemToBill(
@@ -85,42 +98,51 @@ class SalesCubit extends Cubit<SalesState> {
       quantity: quantity ?? inv.quantity,
     );
     _items.add(billItem);
-    await billRepository.insertBillItem(billItem);
-    if (!isClosed) emit(SalesUpdated(List.from(_items)));
+    // Don't insert to DB here - items will be inserted when bill is created
+    if (!isClosed) {
+      emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+    }
   }
 
   Future<void> clearItems() async {
     _items.clear();
-    await billRepository.clearAllBillItems();
-    if (!isClosed) emit(SalesUpdated(List.from(_items)));
+    // Don't clear DB here - only clear in-memory items
+    if (!isClosed) emit(SalesUpdated([]));
   }
 
   Future<void> removeItem(BillItem item) async {
     _items.removeWhere((i) => i.id == item.id);
-    await billRepository.softDeleteItem(item.id!);
-    await loadSalesFromDb();
-    if (!isClosed) emit(SalesUpdated(List.from(_items)));
+    _reorderSerialsAndNames();
+    if (!isClosed) {
+      emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+    }
   }
 
   Future<void> updateItem(BillItem updatedItem) async {
     final idx = _items.indexWhere((i) => i.id == updatedItem.id);
     if (idx != -1) {
       _items[idx] = updatedItem;
-      await billRepository.updateBillItem(updatedItem);
-      if (!isClosed) emit(SalesUpdated(List.from(_items)));
+      // Don't update DB here - only update in-memory item
+      if (!isClosed) {
+        emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+      }
     }
   }
 
   void searchItems(String query) {
     if (query.isEmpty) {
-      if (!isClosed) emit(SalesUpdated(List.from(_items)));
+      if (!isClosed) {
+        emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+      }
     } else {
       final filtered = _items
           .where(
             (item) => item.name.toLowerCase().contains(query.toLowerCase()),
           )
           .toList();
-      if (!isClosed) emit(SalesUpdated(filtered));
+      if (!isClosed) {
+        emit(SalesUpdated(filtered.where((item) => !_isSold(item)).toList()));
+      }
     }
   }
 
@@ -128,7 +150,9 @@ class SalesCubit extends Cubit<SalesState> {
   BillItem? get editingItem => _editingItem;
   void startEdit(BillItem item) {
     _editingItem = item;
-    if (!isClosed) emit(SalesUpdated(List.from(_items)));
+    if (!isClosed) {
+      emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+    }
   }
 
   InventoryItem? getInventoryItemByShortcut(String shortcut) {
@@ -146,8 +170,51 @@ class SalesCubit extends Cubit<SalesState> {
   }
 
   Future<void> addBillItem(BillItem item) async {
-    final inserted = await billRepository.insertBillItem(item);
-    _items.add(inserted);
-    if (!isClosed) emit(SalesUpdated(List.from(_items)));
+    // Add to in-memory list only - will be saved when bill is created
+    _items.add(item);
+    if (!isClosed) {
+      emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+    }
+  }
+
+  void updateInventory(List<InventoryItem> newInventory) {
+    inventory
+      ..clear()
+      ..addAll(newInventory);
+    emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+  }
+
+  Future<void> removeItemByFields(
+    String name,
+    double price,
+    double quantity,
+    int serialNo,
+  ) async {
+    _items.removeWhere(
+      (i) =>
+          (i.id == null) &&
+          i.name == name &&
+          i.price == price &&
+          i.quantity == quantity &&
+          i.serialNo == serialNo,
+    );
+    _reorderSerialsAndNames();
+    if (!isClosed) {
+      emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+    }
+  }
+
+  void _reorderSerialsAndNames() {
+    int serial = 1;
+    for (var i = 0; i < _items.length; i++) {
+      final item = _items[i];
+      // Only update name if it matches the default pattern
+      final isDefault = RegExp(r'^Item \d+ ?$').hasMatch(item.name);
+      _items[i] = item.copyWith(
+        serialNo: serial,
+        name: isDefault ? 'Item $serial' : item.name,
+      );
+      serial++;
+    }
   }
 }

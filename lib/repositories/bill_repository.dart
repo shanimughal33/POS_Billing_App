@@ -1,21 +1,48 @@
+// ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
+
 import '../database/database_helper.dart';
 import '../models/bill_item.dart';
+import '../models/bill.dart';
 
 class BillRepository {
   final DatabaseHelper _databaseHelper = DatabaseHelper.instance;
 
-  Future<BillItem> insertBillItem(BillItem item) async {
-    try {
-      return await _databaseHelper.withTransaction((txn) async {
-        // Get next serial in transaction
-        final nextSerial = await txn.rawQuery('''
-          SELECT COALESCE(MAX(serialNo), 0) + 1 as nextSerial 
-          FROM bill_items WHERE isDeleted = 0
-        ''');
-        final serialNo = nextSerial.first['nextSerial'] as int? ?? 1;
+  // Insert a Bill and its items in a transaction with proper foreign key relationship
+  Future<int> insertBillWithItems(Bill bill) async {
+    return await _databaseHelper.withTransaction((txn) async {
+      // Step 1: Insert Bill first
+      final billMap = {
+        'billNumber': bill.id ?? '',
+        'customerName': bill.customerName,
+        'paymentMethod': bill.paymentMethod,
+        'date': bill.date.toIso8601String(),
+        'subTotal': bill.subTotal,
+        'discount': bill.discount,
+        'tax': bill.tax,
+        'total': bill.total,
+      };
 
+      print('[DEBUG] Inserting bill: ' + billMap.toString());
+      final billId = await txn.insert('bills', billMap);
+      print('[DEBUG] Inserted bill with ID: $billId');
+
+      // Step 2: Insert all BillItems with the correct billId
+      int serial = 1;
+      print('[DEBUG] Bill items count: ' + bill.items.length.toString());
+
+      for (final item in bill.items) {
+        print('[DEBUG] Processing item: ' + item.toMap().toString());
+
+        // Validate item data
+        if (item.name.trim().isEmpty || item.price <= 0 || item.quantity <= 0) {
+          print('[DEBUG] Skipping invalid item: ' + item.name);
+          continue;
+        }
+
+        // Create item map with the correct billId
         final itemMap = {
-          'serialNo': serialNo,
+          'billId': billId, // This is the key - link to the bill
+          'serialNo': serial,
           'name': item.name,
           'price': item.price,
           'quantity': item.quantity,
@@ -23,53 +50,118 @@ class BillRepository {
           'isDeleted': 0,
         };
 
-        final id = await txn.insert('bill_items', itemMap);
-        if (id <= 0) throw Exception('Failed to insert item');
+        print('[DEBUG] Inserting bill item: ' + itemMap.toString());
+        final itemId = await txn.insert('bill_items', itemMap);
+        print(
+          '[DEBUG] Successfully inserted item with ID: $itemId and billId: $billId',
+        );
 
-        print('Successfully inserted item with ID: $id');
-        return BillItem.fromMap({...itemMap, 'id': id});
-      });
+        serial++;
+      }
+
+      return billId;
+    });
+  }
+
+  // Fetch all Bills with their items
+  Future<List<Bill>> getAllBills() async {
+    final db = await _databaseHelper.database;
+    final billRows = await db.query(
+      'bills',
+      where: 'isDeleted = 0',
+      orderBy: 'date DESC',
+    );
+
+    List<Bill> bills = [];
+    for (final row in billRows) {
+      print('[DEBUG] getAllBills row: ' + row.toString());
+      final billId = row['id'] as int;
+      final items = await getBillItems(billId);
+      print('[DEBUG] Found ${items.length} items for bill $billId');
+
+      bills.add(
+        Bill(
+          id: row['id'].toString(),
+          date: DateTime.parse(row['date'] as String),
+          customerName: row['customerName'] as String,
+          paymentMethod: row['paymentMethod'] as String,
+          items: items,
+          discount: (row['discount'] as num?)?.toDouble() ?? 0.0,
+          tax: (row['tax'] as num?)?.toDouble() ?? 0.0,
+          subTotal: (row['subTotal'] as num?)?.toDouble(),
+          total: (row['total'] as num?)?.toDouble(),
+          isDeleted: (row['isDeleted'] is int
+              ? row['isDeleted'] == 1
+              : row['isDeleted'] == true),
+        ),
+      );
+    }
+    return bills;
+  }
+
+  // Fetch BillItems for a specific Bill
+  Future<List<BillItem>> getBillItems(int billId) async {
+    print('[DEBUG] getBillItems called with billId: $billId');
+    final db = await _databaseHelper.database;
+
+    // Use a raw query to ensure we get all items for this bill
+    final items = await db.rawQuery(
+      'SELECT * FROM bill_items WHERE billId = ? AND isDeleted = 0 ORDER BY serialNo ASC',
+      [billId],
+    );
+
+    print('[DEBUG] getBillItems raw result: ' + items.toString());
+
+    return items.map((map) {
+      print('[DEBUG] Creating BillItem from map: ' + map.toString());
+      return BillItem.fromMap(map);
+    }).toList();
+  }
+
+  // Get all bill items (for reports)
+  Future<List<BillItem>> getAllBillItems() async {
+    try {
+      print('[DEBUG] getAllBillItems called');
+      final db = await _databaseHelper.database;
+
+      // Get all active items
+      final items = await db.rawQuery('''
+        SELECT * FROM bill_items 
+        WHERE isDeleted = 0 
+        ORDER BY serialNo ASC, createdAt ASC
+      ''');
+
+      print('[DEBUG] Found ${items.length} active items: ' + items.toString());
+      return items.map((map) => BillItem.fromMap(map)).toList();
     } catch (e) {
-      print('Error inserting item: $e');
+      print('[DEBUG] Error loading items: $e');
       rethrow;
     }
   }
 
-  Future<void> softDeleteItem(int id) async {
-    await _databaseHelper.withTransaction((txn) async {
-      // First mark the item as deleted
-      await txn.rawUpdate(
-        'UPDATE bill_items SET isDeleted = 1, deletedAt = ? WHERE id = ?',
-        [DateTime.now().toIso8601String(), id],
-      );
-
-      // Get all active items
-      final activeItems = await txn.query(
-        'bill_items',
-        where: 'isDeleted = 0',
-        orderBy: 'serialNo ASC',
-      );
-
-      // Update serial numbers and rename default-named items
-      final batch = txn.batch();
-      for (int i = 0; i < activeItems.length; i++) {
-        final newSerialNo = i + 1;
-        final currentName = activeItems[i]['name'] as String;
-
-        // Only rename if it follows the "Item X" pattern
-        final String newName = currentName.startsWith('Item ')
-            ? 'Item $newSerialNo'
-            : currentName;
-
-        batch.rawUpdate(
-          'UPDATE bill_items SET serialNo = ?, name = ? WHERE id = ?',
-          [newSerialNo, newName, activeItems[i]['id']],
-        );
-      }
-      await batch.commit(noResult: true);
-    });
+  // Get all sold items (for reports)
+  Future<List<BillItem>> getAllSoldItems() async {
+    final db = await _databaseHelper.database;
+    final items = await db.query(
+      'bill_items',
+      where: 'billId IS NOT NULL AND isDeleted = 0',
+      orderBy: 'createdAt DESC',
+    );
+    return items.map((map) => BillItem.fromMap(map)).toList();
   }
 
+  // Soft delete a bill
+  Future<void> softDeleteBill(int billId) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'bills',
+      {'isDeleted': 1},
+      where: 'id = ?',
+      whereArgs: [billId],
+    );
+  }
+
+  // Update a bill item
   Future<void> updateBillItem(BillItem item) async {
     await _databaseHelper.withTransaction((txn) async {
       if (item.id == null) throw Exception('Cannot update item without ID');
@@ -92,37 +184,7 @@ class BillRepository {
     });
   }
 
-  Future<List<BillItem>> getAllBillItems() async {
-    try {
-      final db = await _databaseHelper.database;
-
-      // First verify the table exists
-      final tableCheck = await db.rawQuery('''
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='bill_items'
-      ''');
-
-      if (tableCheck.isEmpty) {
-        print('Table not found, returning empty list');
-        return [];
-      }
-
-      // Get all active items with one query
-      final items = await db.rawQuery('''
-        SELECT * FROM bill_items 
-        WHERE isDeleted = 0 
-        ORDER BY serialNo ASC, createdAt ASC
-      ''');
-
-      print('Found ${items.length} active items');
-
-      return items.map((map) => BillItem.fromMap(map)).toList();
-    } catch (e) {
-      print('Error loading items: $e');
-      rethrow;
-    }
-  }
-
+  // Clear all bill items (for testing)
   Future<void> clearAllBillItems() async {
     final db = await _databaseHelper.database;
     await db.delete('bill_items');

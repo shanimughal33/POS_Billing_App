@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -7,6 +9,7 @@ import '../widgets/pos_receipt.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import '../utils/business_info.dart';
 
 class ReceiptScreen extends StatelessWidget {
   final List<BillItem> items;
@@ -16,23 +19,24 @@ class ReceiptScreen extends StatelessWidget {
   final DateTime dateTime;
   final int billNumber;
 
-  ReceiptScreen({
-    Key? key,
+  const ReceiptScreen({
+    super.key,
     required this.items,
     required this.total,
     required this.customerName,
     required this.paymentMethod,
     required this.dateTime,
     required this.billNumber,
-  }) : super(key: key);
+  });
 
   Future<void> _shareBill() async {
     try {
+      final businessInfo = await BusinessInfo.load();
       final pdf = pw.Document();
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.roll80,
-          build: (context) => _buildReceiptPdf(),
+          build: (context) => _buildReceiptPdf(businessInfo),
         ),
       );
       final output = await getTemporaryDirectory();
@@ -45,17 +49,22 @@ class ReceiptScreen extends StatelessWidget {
   }
 
   Future<void> _printReceipt() async {
+    final businessInfo = await BusinessInfo.load();
     final pdf = pw.Document();
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.roll80,
-        build: (context) => _buildReceiptPdf(),
+        build: (context) => _buildReceiptPdf(businessInfo),
       ),
     );
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
-  pw.Widget _buildReceiptPdf() {
+  pw.Widget _buildReceiptPdf(BusinessInfo businessInfo) {
+    final subtotal = items.fold(0.0, (sum, item) => sum + item.total);
+    final taxRate = double.tryParse(businessInfo.taxRate) ?? 0.0;
+    final taxAmount = subtotal * (taxRate / 100);
+    final grandTotal = subtotal + taxAmount;
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -79,7 +88,7 @@ class ReceiptScreen extends StatelessWidget {
         pw.SizedBox(height: 8),
         pw.Center(
           child: pw.Text(
-            'GROCERY STORE',
+            businessInfo.name,
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 28,
@@ -92,7 +101,7 @@ class ReceiptScreen extends StatelessWidget {
         pw.SizedBox(height: 2),
         pw.Center(
           child: pw.Text(
-            '123 Main Street, City',
+            businessInfo.address,
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 15,
@@ -102,7 +111,7 @@ class ReceiptScreen extends StatelessWidget {
         ),
         pw.Center(
           child: pw.Text(
-            'Tel: (123) 456-7890',
+            'Tel: ${businessInfo.phone}',
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 15,
@@ -110,6 +119,17 @@ class ReceiptScreen extends StatelessWidget {
             ),
           ),
         ),
+        if (businessInfo.email.isNotEmpty)
+          pw.Center(
+            child: pw.Text(
+              'Email: ${businessInfo.email}',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontSize: 15,
+                color: PdfColors.grey800,
+              ),
+            ),
+          ),
         pw.SizedBox(height: 8),
         _asciiDividerPdf(),
         pw.SizedBox(height: 10),
@@ -176,6 +196,54 @@ class ReceiptScreen extends StatelessWidget {
                 font: pw.Font.courier(),
                 fontSize: 15,
                 color: PdfColors.black,
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Subtotal:',
+              style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+            ),
+            pw.Text(
+              '${businessInfo.currency} ${subtotal.toStringAsFixed(2)}',
+              style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+            ),
+          ],
+        ),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Tax (${businessInfo.taxRate}%):',
+              style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+            ),
+            pw.Text(
+              '${businessInfo.currency} ${taxAmount.toStringAsFixed(2)}',
+              style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+            ),
+          ],
+        ),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Total:',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            pw.Text(
+              '${businessInfo.currency} ${grandTotal.toStringAsFixed(2)}',
+              style: pw.TextStyle(
+                font: pw.Font.courier(),
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 16,
               ),
             ),
           ],
@@ -459,7 +527,18 @@ class ReceiptScreen extends StatelessWidget {
           ],
         ),
         pw.SizedBox(height: 10),
-        // Footer
+        // Support/Thank you section
+        pw.Center(
+          child: pw.Text(
+            'Support: ${businessInfo.phone}',
+            style: pw.TextStyle(
+              font: pw.Font.courier(),
+              fontSize: 13,
+              color: PdfColors.black,
+            ),
+          ),
+        ),
+        pw.SizedBox(height: 2),
         pw.Center(
           child: pw.Text(
             'Thank you for shopping with us!',
@@ -471,6 +550,10 @@ class ReceiptScreen extends StatelessWidget {
             ),
           ),
         ),
+        pw.SizedBox(height: 10),
+        _asciiDividerPdf(),
+        pw.SizedBox(height: 10),
+        // Footer
         pw.Center(
           child: pw.Text(
             'Items once sold cannot be returned.',
@@ -578,59 +661,76 @@ class ReceiptScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF128C7E),
-        title: Text(
-          'Bill #${billNumber.toString().padLeft(6, '0')}',
-          style: const TextStyle(fontSize: 18, color: Colors.white),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          // Print button
-          IconButton(
-            icon: const Icon(Icons.print, color: Colors.white),
-            onPressed: _printReceipt,
+    return FutureBuilder<BusinessInfo>(
+      future: BusinessInfo.load(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final businessInfo = snapshot.data!;
+        return Scaffold(
+          backgroundColor: Colors.grey[100],
+          appBar: AppBar(
+            backgroundColor: Colors.white,
+            title: Text(
+              'Bill #${billNumber.toString().padLeft(6, '0')}',
+              style: const TextStyle(fontSize: 18, color: Color(0xFF0A2342)),
+            ),
+            leading: IconButton(
+              icon: const Icon(
+                Icons.arrow_back_ios,
+                color: Color(0xFF0A2342),
+                size: 20,
+              ),
+              onPressed: () => Navigator.pop(context),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.print, color: Color(0xFF0A2342)),
+                onPressed: _printReceipt,
+              ),
+              IconButton(
+                icon: const Icon(Icons.share, color: Color(0xFF0A2342)),
+                onPressed: _shareBill,
+              ),
+            ],
           ),
-          // Share button
-          IconButton(
-            icon: const Icon(Icons.share, color: Colors.white),
-            onPressed: _shareBill,
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 500),
-            margin: const EdgeInsets.symmetric(vertical: 16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.3),
-                  spreadRadius: 1,
-                  blurRadius: 5,
-                  offset: const Offset(0, 2),
+          body: SingleChildScrollView(
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 500),
+                margin: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withAlpha(76),
+                      spreadRadius: 1,
+                      blurRadius: 5,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: POSReceipt(
-              items: items,
-              total: total,
-              customerName: customerName,
-              paymentMethod: paymentMethod,
-              dateTime: dateTime,
-              billNumber: billNumber,
+                child: POSReceipt(
+                  items: items,
+                  total: total,
+                  customerName: customerName,
+                  paymentMethod: paymentMethod,
+                  dateTime: dateTime,
+                  billNumber: billNumber,
+                  businessInfo: businessInfo,
+                  discount: (businessInfo.enableDiscounts
+                      ? (businessInfo.defaultDiscount ?? 0.0)
+                      : 0.0),
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

@@ -1,13 +1,44 @@
 import 'package:flutter/material.dart';
 import '../models/inventory_item.dart';
-import '../repositories/inventory_repository.dart';
-import '../main.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/inventory_cubit.dart';
-import '../utils/shortcut_validator.dart';
+import '../models/activity.dart';
+import '../repositories/activity_repository.dart';
+import '../utils/app_theme.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 class PurchaseScreen extends StatelessWidget {
   const PurchaseScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return _PurchaseScreenAutoOpenWrapper();
+  }
+}
+
+class _PurchaseScreenAutoOpenWrapper extends StatefulWidget {
+  @override
+  State<_PurchaseScreenAutoOpenWrapper> createState() =>
+      _PurchaseScreenAutoOpenWrapperState();
+}
+
+class _PurchaseScreenAutoOpenWrapperState
+    extends State<_PurchaseScreenAutoOpenWrapper> {
+  bool _opened = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_opened) {
+      _opened = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final state = context.findAncestorStateOfType<_PurchaseViewState>();
+        if (state != null && mounted) {
+          state._showItemDialog(context);
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,18 +59,12 @@ class _PurchaseViewState extends State<PurchaseView> {
   String _searchQuery = '';
   final ScrollController _scrollController = ScrollController();
 
-  // For auto-opening Add Item form
-  bool _didAutoOpenAdd = false;
-
   @override
   void initState() {
     super.initState();
-    // Auto-open Add Item form after first frame
+    // Auto-open Add Item form (no autofocus)
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_didAutoOpenAdd) {
-        _didAutoOpenAdd = true;
-        _showItemDialog(context, autoFocus: true);
-      }
+      if (mounted) _showItemDialog(context);
     });
   }
 
@@ -77,69 +102,57 @@ class _PurchaseViewState extends State<PurchaseView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Inventory-style stats summary
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Color(0xFF128C7E),
-              borderRadius: BorderRadius.circular(16),
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF0A2342),
+                  Color(0xFF123060),
+                  Color(0xFF1976D2),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.08),
-                  blurRadius: 8,
-                  offset: Offset(0, 2),
+                  blurRadius: 16,
+                  offset: Offset(0, 6),
                 ),
               ],
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Total',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Rs ${_calculateTotal(items).toStringAsFixed(2)}',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                  ],
+                _buildStatItem(
+                  'Total Items',
+                  items.length.toString(),
+                  Icons.shopping_cart_rounded,
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Total Qty',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '${_calculateTotalQty(items)}',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                  ],
+                _buildStatItem(
+                  'Total Value',
+                  'Rs ${_calculateTotal(items).toStringAsFixed(2)}',
+                  Icons.account_balance,
+                ),
+                _buildStatItem(
+                  'Total Qty',
+                  _calculateTotalQty(items).toString(),
+                  Icons.format_list_numbered,
                 ),
               ],
             ),
-          ),
+          ).animate().fade(duration: 400.ms).slideY(begin: -0.5),
 
           // Search bar (moved below stats)
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: kCardBg,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
@@ -150,27 +163,31 @@ class _PurchaseViewState extends State<PurchaseView> {
                 ),
               ],
             ),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: _search,
-              style: const TextStyle(fontSize: 16),
-              decoration: InputDecoration(
-                hintText: 'Search items...',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
-            ),
+            child:
+                TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      onChanged: _search,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: InputDecoration(
+                        hintText: 'Search items...',
+                        hintStyle: TextStyle(color: Colors.grey[400]),
+                        prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: kCardBg,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                    )
+                    .animate()
+                    .fade(delay: 200.ms, duration: 400.ms)
+                    .slideY(begin: -0.5),
           ),
 
           // Items list
@@ -181,7 +198,10 @@ class _PurchaseViewState extends State<PurchaseView> {
                     controller: _scrollController,
                     itemCount: items.length,
                     itemBuilder: (context, index) =>
-                        _buildItemCard(items[index]),
+                        _buildItemCard(items[index])
+                            .animate()
+                            .fade(delay: (100 * index).ms)
+                            .slideY(begin: 0.5),
                   ),
           ),
         ],
@@ -198,12 +218,12 @@ class _PurchaseViewState extends State<PurchaseView> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: Colors.white, size: 24),
+        Icon(icon, color: kWhite, size: 24),
         const SizedBox(height: 8),
         Text(
           displayValue,
           style: const TextStyle(
-            color: Colors.white,
+            color: kWhite,
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -247,7 +267,7 @@ class _PurchaseViewState extends State<PurchaseView> {
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF128C7E),
+                        color: kBlue,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -258,7 +278,7 @@ class _PurchaseViewState extends State<PurchaseView> {
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF128C7E),
+                            color: kBlue,
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -269,12 +289,12 @@ class _PurchaseViewState extends State<PurchaseView> {
                           ),
                           decoration: BoxDecoration(
                             color: isLowBudget
-                                ? Colors.red.withOpacity(0.1)
-                                : Colors.green.withOpacity(0.1),
+                                ? Colors.red.withAlpha(51)
+                                : Colors.green.withAlpha(51),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            'Budget: ${item.quantity.toStringAsFixed(0)}',
+                            'Qty: ${item.quantity.toStringAsFixed(0)}',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -363,11 +383,7 @@ class _PurchaseViewState extends State<PurchaseView> {
     );
   }
 
-  void _showItemDialog(
-    BuildContext context, {
-    InventoryItem? item,
-    bool autoFocus = false,
-  }) {
+  void _showItemDialog(BuildContext context, {InventoryItem? item}) {
     final nameController = TextEditingController(text: item?.name);
     final priceController = TextEditingController(text: item?.price.toString());
     final quantityController = TextEditingController(
@@ -383,7 +399,7 @@ class _PurchaseViewState extends State<PurchaseView> {
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         decoration: const BoxDecoration(
-          color: Colors.white,
+          color: kCardBg,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(16),
             topRight: Radius.circular(16),
@@ -407,37 +423,27 @@ class _PurchaseViewState extends State<PurchaseView> {
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF128C7E),
+                    color: kBlue,
                   ),
                 ),
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: nameController,
                   focusNode: nameFocus,
-                  autofocus: autoFocus,
                   decoration: InputDecoration(
                     labelText: 'Item Name',
                     hintText: 'Enter item name',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 1,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                   ),
                   validator: (value) {
@@ -458,24 +464,15 @@ class _PurchaseViewState extends State<PurchaseView> {
                     hintText: 'Enter price',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 1,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 1,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                   ),
                   validator: (value) {
@@ -500,24 +497,15 @@ class _PurchaseViewState extends State<PurchaseView> {
                     hintText: 'Enter quantity',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 1,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                   ),
                   validator: (value) {
@@ -539,26 +527,50 @@ class _PurchaseViewState extends State<PurchaseView> {
                     hintText: 'Enter shortcut code',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 0,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFF128C7E),
-                        width: 1,
-                      ),
+                      borderSide: BorderSide.none,
                     ),
                   ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return null;
+                    final pattern = RegExp(r'^[A-D][0-9]{1,4} ?$');
+                    if (!pattern.hasMatch(value)) {
+                      if (RegExp(r'^[0-9]+$').hasMatch(value)) {
+                        return 'Shortcut cannot be only numbers. It must start with A, B, C, or D followed by 1-4 digits (e.g., A1, B12, C123, D1234).';
+                      }
+                      if (!RegExp(r'^[A-D]').hasMatch(value)) {
+                        return 'Shortcut must start with A, B, C, or D (uppercase only).';
+                      }
+                      if (!RegExp(r'^[A-D][0-9]+$').hasMatch(value)) {
+                        return 'Shortcut must be a letter (A-D) followed by 1-4 digits (e.g., A1, B12, C123, D1234).';
+                      }
+                      if (value.length > 5) {
+                        return 'Shortcut can be at most 5 characters (1 letter + up to 4 digits).';
+                      }
+                      return 'Invalid shortcut format.';
+                    }
+                    // Check for duplicate shortcut (case-insensitive, except for current item)
+                    final inventoryState = context.read<InventoryCubit>().state;
+                    if (inventoryState is InventoryLoaded) {
+                      final shortcutUpper = value.toUpperCase();
+                      final duplicate = inventoryState.items.any((inv) {
+                        if (item != null && inv.id == item.id) return false;
+                        return (inv.shortcut ?? '').toUpperCase() ==
+                            shortcutUpper;
+                      });
+                      if (duplicate) {
+                        return 'This shortcut is already in use by another item.';
+                      }
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 24),
                 Row(
@@ -570,7 +582,17 @@ class _PurchaseViewState extends State<PurchaseView> {
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton(
-                      onPressed: () {
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Color(0xFF1976D2),
+                        textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                        side: BorderSide.none,
+                      ),
+                      child: Text(
+                        'Save',
+                        style: TextStyle(color: Color(0xFF1976D2)),
+                      ),
+                      onPressed: () async {
                         if (formKey.currentState!.validate()) {
                           final newItem = InventoryItem(
                             id: item?.id,
@@ -585,16 +607,10 @@ class _PurchaseViewState extends State<PurchaseView> {
                           context.read<InventoryCubit>().saveInventoryItem(
                             newItem,
                           );
+                          await _logInventoryActivity(item, newItem);
                           Navigator.pop(context);
                         }
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF128C7E),
-                      ),
-                      child: Text(
-                        item == null ? 'Add Item' : 'Save Changes',
-                        style: const TextStyle(color: Colors.white),
-                      ),
                     ),
                   ],
                 ),
@@ -602,6 +618,29 @@ class _PurchaseViewState extends State<PurchaseView> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _logInventoryActivity(
+    InventoryItem? oldItem,
+    InventoryItem newItem,
+  ) async {
+    await ActivityRepository().logActivity(
+      Activity(
+        type: oldItem == null ? 'purchase_add' : 'purchase_edit',
+        description:
+            (oldItem == null ? 'Added' : 'Edited') +
+            ' inventory item: ' +
+            newItem.name,
+        timestamp: DateTime.now(),
+        metadata: {
+          'id': newItem.id,
+          'name': newItem.name,
+          'price': newItem.price,
+          'quantity': newItem.quantity,
+          'shortcut': newItem.shortcut,
+        },
       ),
     );
   }
@@ -628,49 +667,49 @@ class _PurchaseViewState extends State<PurchaseView> {
 
     if (confirmed == true) {
       context.read<InventoryCubit>().deleteInventoryItem(id);
+      await _logDeleteInventoryActivity(id);
     }
+  }
+
+  Future<void> _logDeleteInventoryActivity(int id) async {
+    await ActivityRepository().logActivity(
+      Activity(
+        type: 'purchase_delete',
+        description: 'Deleted inventory item with id: $id',
+        timestamp: DateTime.now(),
+        metadata: {'id': id},
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: kWhite,
       appBar: AppBar(
-        title: const Text(
+        backgroundColor: Colors.white,
+        centerTitle: true,
+        title: Text(
           'Purchase Management',
-          style: TextStyle(color: Colors.white),
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () async {
-              // Use cached data for navigation
-              Navigator.of(context).pushNamed('/sales');
-              // Refresh in background after navigation
-              if (mounted) {
-                Future.microtask(() {
-                  context.read<InventoryCubit>().refreshInventory();
-                });
-              }
-            },
-            icon: const Icon(Icons.point_of_sale, color: Colors.white),
-            label: const Text(
-              'Sales',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-                fontSize: 16,
-              ),
-            ),
+          style: const TextStyle(
+            fontSize: 22,
+            color: Color(0xFF0A2342),
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
           ),
-          const SizedBox(width: 8),
-        ],
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+        elevation: 0,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+        ),
       ),
       body: BlocBuilder<InventoryCubit, InventoryState>(
         builder: (context, state) {
           if (state is InventoryLoading) {
             return const Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF128C7E)),
+                valueColor: AlwaysStoppedAnimation<Color>(kBlue),
               ),
             );
           } else if (state is InventoryLoaded) {
@@ -706,11 +745,29 @@ class _PurchaseViewState extends State<PurchaseView> {
           return const SizedBox.shrink();
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showItemDialog(context),
-        backgroundColor: const Color(0xFF128C7E),
-        child: const Icon(Icons.add, color: Colors.white),
-        tooltip: 'Add New Item',
+      floatingActionButton: Container(
+        height: 56,
+        width: 56,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0A2342), Color(0xFF123060), Color(0xFF1976D2)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: IconButton(
+          icon: Icon(Icons.add, color: Colors.white, size: 32),
+          onPressed: () => _showItemDialog(context),
+          tooltip: 'Add New Item',
+        ),
       ),
     );
   }

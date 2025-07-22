@@ -5,6 +5,9 @@ class People {
   final String category; // customer, supplier, or custom
   final double balance;
   final DateTime lastTransactionDate;
+  final String? description;
+  final String? address;
+  final String? notes;
   final int isDeleted;
 
   People({
@@ -14,6 +17,9 @@ class People {
     required this.category,
     required this.balance,
     required this.lastTransactionDate,
+    this.description,
+    this.address,
+    this.notes,
     this.isDeleted = 0,
   });
 
@@ -26,6 +32,9 @@ class People {
       'balance': balance,
       'lastTransactionDate': lastTransactionDate.toIso8601String(),
       'isDeleted': isDeleted,
+      'description': description,
+      'address': address,
+      'notes': notes,
     };
   }
 
@@ -37,7 +46,36 @@ class People {
       category: map['category'] as String,
       balance: (map['balance'] as num).toDouble(),
       lastTransactionDate: DateTime.parse(map['lastTransactionDate'] as String),
+      description: map['description'],
+      address: map['address'],
+      notes: map['notes'],
       isDeleted: map['isDeleted'] == null ? 0 : (map['isDeleted'] as int),
+    );
+  }
+
+  People copyWith({
+    int? id,
+    String? name,
+    String? phone,
+    String? category,
+    double? balance,
+    DateTime? lastTransactionDate,
+    String? description,
+    String? address,
+    String? notes,
+    int? isDeleted,
+  }) {
+    return People(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      category: category ?? this.category,
+      balance: balance ?? this.balance,
+      lastTransactionDate: lastTransactionDate ?? this.lastTransactionDate,
+      description: description ?? this.description,
+      address: address ?? this.address,
+      notes: notes ?? this.notes,
+      isDeleted: isDeleted ?? this.isDeleted,
     );
   }
 }

@@ -5,7 +5,13 @@ class InventoryRepository {
   final dbHelper = DatabaseHelper.instance;
 
   Future<List<InventoryItem>> getAllItems() async {
-    return await dbHelper.getInventoryItems();
+    final db = await dbHelper.database;
+    final maps = await db.query(
+      'inventory',
+      where: 'isSold = 0',
+      orderBy: 'name ASC',
+    );
+    return maps.map((map) => InventoryItem.fromMap(map)).toList();
   }
 
   Future<int> insertItem(InventoryItem item) async {
@@ -38,7 +44,7 @@ class InventoryRepository {
     final db = await dbHelper.database;
     final maps = await db.query(
       'inventory',
-      where: 'name LIKE ?',
+      where: 'name LIKE ? AND isSold = 0',
       whereArgs: ['%$query%'],
       orderBy: 'name ASC',
     );

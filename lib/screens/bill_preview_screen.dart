@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/bill.dart';
+import '../utils/business_info.dart';
 
 class BillPreviewScreen extends StatelessWidget {
   final Bill bill;
@@ -8,82 +9,98 @@ class BillPreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF128C7E),
-        title: const Text('Bill Preview'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.print),
-            onPressed: () => _handlePrint(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: () => _handleShare(context),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 20),
-            _buildCustomerInfo(),
-            const SizedBox(height: 20),
-            _buildItemsTable(),
-            const SizedBox(height: 20),
-            _buildTotals(),
-            const SizedBox(height: 20),
-            _buildFooter(),
-          ],
-        ),
-      ),
-      bottomNavigationBar: BottomAppBar(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF128C7E),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  onPressed: () => _handleSave(context),
-                  child: const Text('Save Bill'),
-                ),
+    return FutureBuilder<BusinessInfo>(
+      future: BusinessInfo.load(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final businessInfo = snapshot.data!;
+        return Scaffold(
+          appBar: AppBar(
+            backgroundColor: const Color(0xFF128C7E),
+            title: const Text('Bill Preview'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.print),
+                onPressed: () => _handlePrint(context),
+              ),
+              IconButton(
+                icon: const Icon(Icons.share),
+                onPressed: () => _handleShare(context),
               ),
             ],
           ),
-        ),
-      ),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(businessInfo),
+                const SizedBox(height: 20),
+                _buildCustomerInfo(),
+                const SizedBox(height: 20),
+                _buildItemsTable(),
+                const SizedBox(height: 20),
+                _buildTotals(),
+                const SizedBox(height: 20),
+                _buildFooter(),
+              ],
+            ),
+          ),
+          bottomNavigationBar: BottomAppBar(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF128C7E),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => _handleSave(context),
+                      child: const Text('Save Bill'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BusinessInfo businessInfo) {
     return Column(
       children: [
-        const Text(
-          'BUSINESS NAME',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        Text(
+          businessInfo.name,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
-        const Text(
-          'Address Line 1, Address Line 2',
-          style: TextStyle(fontSize: 14),
+        Text(businessInfo.address, style: const TextStyle(fontSize: 14)),
+        Text(
+          'Phone: ${businessInfo.phone}',
+          style: const TextStyle(fontSize: 14),
         ),
-        const Text('Phone: +1234567890', style: TextStyle(fontSize: 14)),
+        if (businessInfo.email.isNotEmpty)
+          Text(
+            'Email: ${businessInfo.email}',
+            style: const TextStyle(fontSize: 14),
+          ),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'Bill No: ${bill.id ?? "N/A"}',
+              'Bill No:  {bill.id ?? "N/A"}',
               style: const TextStyle(fontWeight: FontWeight.w500),
             ),
             Text(
-              'Date: ${_formatDate(bill.date)}',
+              'Date:  {_formatDate(bill.date)}',
               style: const TextStyle(fontWeight: FontWeight.w500),
             ),
           ],

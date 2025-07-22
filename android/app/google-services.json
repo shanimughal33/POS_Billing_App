@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "946800454244",
+    "project_id": "pos-app-68bcc",
+    "storage_bucket": "pos-app-68bcc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:946800454244:android:43b9d44ba3ec2ae281cd71",
+        "android_client_info": {
+          "package_name": "com.example.forward_billing_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "946800454244-o0rmoan2fj5p6habo4aibfs9dhslovub.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.forward_billing_app",
+            "certificate_hash": "a06822e2040bc68b4df4443b4ecbf8ea34186c28"
+          }
+        },
+        {
+          "client_id": "946800454244-uqagb3anelilpm6p4b7u0s9tgql3auuk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA_N-M2nrJs33mX-hzluF5ekwVe9P4iROw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "946800454244-uqagb3anelilpm6p4b7u0s9tgql3auuk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

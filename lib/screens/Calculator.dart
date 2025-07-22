@@ -1,18 +1,22 @@
 import 'dart:async';
 import 'package:forward_billing_app/screens/receipt_screen.dart';
-import 'package:forward_billing_app/screens/inventory_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:math_expressions/math_expressions.dart';
 import '../models/bill_item.dart';
 import '../repositories/bill_repository.dart';
-import '../database/database_helper.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/inventory_cubit.dart';
 import '../cubit/sales_cubit.dart';
-import '../repositories/inventory_repository.dart';
 import '../utils/shortcut_validator.dart';
 import '../repositories/people_repository.dart';
 import '../models/people.dart';
+import '../models/bill.dart';
+import '../models/inventory_item.dart';
+import '../models/activity.dart';
+import '../repositories/activity_repository.dart';
+import '../utils/app_theme.dart';
+import 'dart:ui'; // For BackdropFilter
+import 'package:google_fonts/google_fonts.dart'; // For modern fonts
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -56,8 +60,6 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   // Add this variable to track editing state
   BillItem? _editingItem;
 
-  bool _isLoading = true;
-
   // Add parser instance
   final Parser _parser = Parser();
   final ContextModel _context = ContextModel();
@@ -72,15 +74,61 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   Timer? _shortcutEntryTimer;
   static const Duration _shortcutEntryTimeout = Duration(milliseconds: 500);
 
+  // Add state for pressed button for animation
+  String? _pressedButton;
+
+  // Add shimmer effect for total
+  Widget _shimmerTotal(String value) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(seconds: 2),
+      curve: Curves.easeInOut,
+      builder: (context, t, child) {
+        return ShaderMask(
+          shaderCallback: (rect) {
+            return LinearGradient(
+              colors: [
+                Colors.white.withOpacity(0.7),
+                Colors.blue.withOpacity(0.7),
+                Colors.white.withOpacity(0.7),
+              ],
+              stops: [t - 0.2, t, t + 0.2],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              tileMode: TileMode.mirror,
+            ).createShader(rect);
+          },
+          child: child,
+          blendMode: BlendMode.srcATop,
+        );
+      },
+      child: Text(
+        value,
+        style: GoogleFonts.urbanist(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.bold, // ensure bold
+          letterSpacing: 0.5,
+          shadows: [
+            Shadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.left,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _initializeSearchAnimation();
     _fetchCustomers();
-    // Load sales items from DB
+    // Always load inventory on open
     Future.microtask(() {
-      final salesCubit = context.read<SalesCubit>();
-      salesCubit.loadSalesFromDb();
+      final inventoryCubit = context.read<InventoryCubit>();
+      inventoryCubit.loadInventory();
     });
   }
 
@@ -95,7 +143,6 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     );
   }
 
-  @override
   void dispose() {
     _searchAnimationController?.dispose();
     _searchController.dispose();
@@ -220,48 +267,89 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   void _handleShortcut(String key) {
-    // Use SalesCubit to look up inventory item by shortcut
-    final salesCubit = context.read<SalesCubit>();
-    salesCubit.addItemFromShortcut(key);
-    // The UI will update via BlocListener below
+    // Use InventoryCubit to look up inventory item by shortcut
+    final inventoryState = context.read<InventoryCubit>().state;
+    List inventoryList = [];
+    if (inventoryState is InventoryLoaded) {
+      inventoryList = inventoryState.items
+          .where((i) => i.isSold == false)
+          .toList();
+    }
+    final item = inventoryList.firstWhere(
+      (inv) =>
+          (inv.shortcut ?? '').trim().toUpperCase() == key.trim().toUpperCase(),
+      orElse: () => null,
+    );
+    if (item != null) {
+      // Check if item is out of stock (quantity is 0 or less)
+      if (item.quantity <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Out of stock! ${item.name} has no items available.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Add 1 item by default for shortcuts
+      context.read<SalesCubit>().addBillItem(
+        BillItem(serialNo: 0, name: item.name, price: item.price, quantity: 1),
+      );
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Added ${item.name} to bill'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No item found for shortcut $key'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _handleOperation(String operation) {
-    if (operation == '*' && !isEditingQuantity) {
-      // Evaluate current expression before switching
-      if (priceValue.isNotEmpty) {
-        try {
-          final result = _parseExpression(priceValue);
-          priceValue = result;
-          priceController.text = result;
-        } catch (e) {
-          debugPrint('Error evaluating expression: $e');
-        }
+    if (isEditingQuantity) {
+      if (quantityValue.isEmpty && operation != '-') {
+        return; // Prevent leading operators other than minus
       }
-      _showCalculator(true);
-      return;
+      if (RegExp(r'[+\-*/%]$').hasMatch(quantityValue.trim())) {
+        return; // Prevent consecutive operators
+      }
+      quantityValue = '${quantityValue.trim()} $operation ';
+      quantityController.text = quantityValue;
+    } else {
+      if (priceValue.isEmpty && operation != '-') {
+        return;
+      }
+      if (RegExp(r'[+\-*/%]$').hasMatch(priceValue.trim())) {
+        return;
+      }
+      if (operation == '*') {
+        _showCalculator(true);
+        return;
+      }
+      priceValue = '${priceValue.trim()} $operation ';
+      priceController.text = priceValue;
     }
-
-    setState(() {
-      if (isEditingQuantity) {
-        String currentText = quantityController.text;
-        if (!RegExp(r'[+\-*/%]$').hasMatch(currentText)) {
-          quantityValue = '$currentText $operation';
-          quantityController.text = quantityValue;
-        }
-      } else {
-        String currentText = priceController.text;
-        if (!RegExp(r'[+\-*/%]$').hasMatch(currentText)) {
-          priceValue = '$currentText $operation';
-          priceController.text = priceValue;
-        }
-      }
-    });
   }
 
   String _parseExpression(String input) {
     try {
       if (input.isEmpty) return '';
+      input = input.trim();
+
+      // Prevent division by zero
+      if (input.contains('/ 0')) {
+        return 'Error';
+      }
 
       // Handle percentage calculations
       if (input.contains('%')) {
@@ -292,8 +380,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       // Format result without decimal places
       return result.toStringAsFixed(0);
     } catch (e) {
-      // Return original input if parsing fails
-      return input;
+      return 'Error';
     }
   }
 
@@ -406,6 +493,35 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       if (price <= 0) return 'Price must be greater than 0';
       if (quantity <= 0) return 'Quantity must be greater than 0';
 
+      // Check inventory availability
+      final inventoryState = context.read<InventoryCubit>().state;
+      if (inventoryState is InventoryLoaded) {
+        final itemName = itemNameController.text.trim();
+        if (itemName.isNotEmpty) {
+          // Find matching inventory item by name
+          final matchingItems = inventoryState.items
+              .where(
+                (inv) =>
+                    inv.name.trim().toLowerCase() == itemName.toLowerCase(),
+              )
+              .toList();
+
+          if (matchingItems.isNotEmpty) {
+            final inventoryItem = matchingItems.first;
+
+            // Check if item is out of stock
+            if (inventoryItem.quantity <= 0) {
+              return 'Out of stock! ${inventoryItem.name} has no items available.';
+            }
+
+            // Check if requested quantity exceeds available stock
+            if (quantity > inventoryItem.quantity) {
+              return 'Insufficient stock! ${inventoryItem.name} has only ${inventoryItem.quantity.toStringAsFixed(0)} items available. You cannot add more than ${inventoryItem.quantity.toStringAsFixed(0)} items.';
+            }
+          }
+        }
+      }
+
       return null;
     } catch (e) {
       return 'Invalid input values';
@@ -450,58 +566,61 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   // In addBillItem, after a successful add, clear price/qty and set itemNameController.text to _getDefaultItemName()
   Future<void> addBillItem() async {
-    try {
-      final error = validateInputs();
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error), backgroundColor: Colors.red),
-        );
-        return;
-      }
-      double finalPrice = double.parse(_parseExpression(priceValue));
-      double finalQuantity = double.parse(_parseExpression(quantityValue));
-      if (_editingItem != null) {
-        final updatedItem = BillItem(
-          id: _editingItem!.id,
-          serialNo: _editingItem!.serialNo,
-          name: itemNameController.text.trim().isNotEmpty
-              ? itemNameController.text.trim()
-              : _editingItem!.name,
-          price: finalPrice,
-          quantity: finalQuantity,
-        );
-        await _billRepository.updateBillItem(updatedItem);
-      } else {
-        String itemName = itemNameController.text.trim();
-        if (itemName.isEmpty) {
-          itemName = _getDefaultItemName();
-        }
-        final newItem = BillItem(
-          serialNo: 0,
-          name: itemName,
-          price: finalPrice,
-          quantity: finalQuantity,
-        );
-        await context.read<SalesCubit>().addBillItem(newItem);
-      }
-      // Clear price and quantity fields, set item name to next default
-      priceController.clear();
-      quantityController.clear();
-      priceValue = '';
-      quantityValue = '';
-      itemNameController.text = _getDefaultItemName();
-      _shortcutBuffer = '';
-      setState(() {});
-    } catch (e) {
-      debugPrint('Error managing item: $e');
-      if (!mounted) return;
+    final validationError = validateInputs();
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(validationError), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final priceResult = _parseExpression(priceValue);
+    final quantityResult = _parseExpression(quantityValue);
+
+    if (priceResult == 'Error' || quantityResult == 'Error') {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save item'),
+          content: Text('Invalid calculation'),
           backgroundColor: Colors.red,
         ),
       );
+      return;
     }
+
+    double finalPrice = double.parse(priceResult);
+    double finalQuantity = double.parse(quantityResult);
+    if (_editingItem != null) {
+      final updatedItem = BillItem(
+        id: _editingItem!.id,
+        serialNo: _editingItem!.serialNo,
+        name: itemNameController.text.trim().isNotEmpty
+            ? itemNameController.text.trim()
+            : _editingItem!.name,
+        price: finalPrice,
+        quantity: finalQuantity,
+      );
+      await _billRepository.updateBillItem(updatedItem);
+    } else {
+      String itemName = itemNameController.text.trim();
+      if (itemName.isEmpty) {
+        itemName = _getDefaultItemName();
+      }
+      final newItem = BillItem(
+        serialNo: 0,
+        name: itemName,
+        price: finalPrice,
+        quantity: finalQuantity,
+      );
+      await context.read<SalesCubit>().addBillItem(newItem);
+    }
+    // Clear price and quantity fields, set item name to next default
+    priceController.clear();
+    quantityController.clear();
+    priceValue = '';
+    quantityValue = '';
+    itemNameController.text = _getDefaultItemName();
+    _shortcutBuffer = '';
+    setState(() {});
   }
 
   // Update toggle search method
@@ -546,6 +665,26 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       final String paymentMethod = _selectedPaymentMethod;
       final int billNumber = DateTime.now().millisecondsSinceEpoch % 1000000;
 
+      // *** Save Bill and its items ***
+      final BillRepository billRepo = BillRepository();
+      final bill = Bill(
+        id: billNumber.toString(),
+        date: billDate,
+        customerName: customer,
+        paymentMethod: paymentMethod,
+        items: billItems,
+      );
+      await billRepo.insertBillWithItems(bill);
+
+      await ActivityRepository().logActivity(
+        Activity(
+          type: 'sale_add',
+          description: 'Created bill for $customer, total: Rs $billTotal',
+          timestamp: DateTime.now(),
+          metadata: {'id': bill.id, 'customer': customer, 'total': billTotal},
+        ),
+      );
+
       // *** Ensure cart is cleared before bill creation ***
       await context.read<SalesCubit>().clearItems();
 
@@ -578,8 +717,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         ),
       );
 
-      // Sync inventory after sale
+      // Update inventory after sale (handles quantity reduction and marking as sold when quantity reaches 0)
       await context.read<InventoryCubit>().updateInventoryAfterSale(billItems);
+
+      // Refresh SalesCubit inventory after sale
+      final inventoryCubit = context.read<InventoryCubit>();
+      final salesCubit = context.read<SalesCubit>();
+      final latestInventory = inventoryCubit.unsoldItems;
+      salesCubit.updateInventory(latestInventory);
 
       // Show success message
       if (!mounted) return;
@@ -661,9 +806,26 @@ class _CalculatorScreenState extends State<CalculatorScreen>
             appBar: PreferredSize(
               preferredSize: const Size.fromHeight(87),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(5, 10, 0, 10),
-                color: const Color(0xFF128C7E),
-                // Green background
+                padding: const EdgeInsets.fromLTRB(5, 6, 0, 6),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.white, Colors.blue.shade50],
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(24),
+                    bottomRight: Radius.circular(24),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFF1976D2).withOpacity(0.13),
+                      blurRadius: 16,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+
                 child: SafeArea(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -672,7 +834,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       IconButton(
                         icon: const Icon(
                           Icons.arrow_back_ios,
-                          color: Colors.white,
+                          color: Color.fromARGB(255, 6, 61, 107),
                           size: 16,
                         ),
                         onPressed: () {
@@ -690,16 +852,24 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                             // Add Customer Dropdown
                             Container(
                               height: 30,
-                              width: 135,
+                              width: 140,
                               margin: const EdgeInsets.only(bottom: 4),
-                              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               decoration: BoxDecoration(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(6),
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Color(0xFF0A2342).withOpacity(0.13),
+                                    blurRadius: 16,
+                                    offset: Offset(0, 6),
+                                  ),
+                                ],
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
-                                  dropdownColor: Color(0xFF1E8858),
                                   isExpanded: true,
                                   value: _selectedCustomer,
                                   hint: const Text(
@@ -707,14 +877,15 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                      color: Colors.blue,
                                     ),
                                   ),
                                   icon: const Icon(
                                     Icons.keyboard_arrow_down,
                                     size: 20,
-                                    color: Colors.white,
+                                    color: Colors.blue,
                                   ),
+                                  dropdownColor: Colors.white,
                                   onChanged: (String? newValue) {
                                     setState(() {
                                       _selectedCustomer = newValue;
@@ -726,15 +897,16 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                         children: [
                                           CircleAvatar(
                                             radius: 12,
-                                            backgroundColor: Colors.white
-                                                .withOpacity(0.2),
+                                            backgroundColor: Color(
+                                              0xFF1E8858,
+                                            ).withOpacity(0.13),
                                             child: Text(
                                               customer.name.isNotEmpty
                                                   ? customer.name[0]
                                                         .toUpperCase()
                                                   : '',
                                               style: const TextStyle(
-                                                color: Colors.white,
+                                                color: Colors.blue,
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                               ),
@@ -745,7 +917,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                             customer.name,
                                             style: const TextStyle(
                                               fontSize: 13,
-                                              color: Colors.white,
+                                              color: Colors.blue,
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
@@ -760,15 +932,15 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                         children: [
                                           CircleAvatar(
                                             radius: 12,
-                                            backgroundColor: Colors.white
-                                                .withOpacity(0.2),
+                                            backgroundColor: (Colors.blue)
+                                                .withOpacity(0.13),
                                             child: Text(
                                               customer.name.isNotEmpty
                                                   ? customer.name[0]
                                                         .toUpperCase()
                                                   : '',
                                               style: const TextStyle(
-                                                color: Colors.white,
+                                                color: Color(0xFF1E8858),
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                               ),
@@ -779,7 +951,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                             customer.name,
                                             style: const TextStyle(
                                               fontSize: 13,
-                                              color: Colors.white,
+                                              color: Colors.blue,
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
@@ -794,14 +966,21 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                             // Payment Method Dropdown
                             Container(
                               height: 30,
-                              width: 115,
-                              margin: const EdgeInsets.only(left: 10),
+                              width: 140,
+                              margin: const EdgeInsets.only(left: 0),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(6),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Color(0xFF0A2342).withOpacity(0.13),
+                                    blurRadius: 16,
+                                    offset: Offset(0, 6),
+                                  ),
+                                ],
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
@@ -809,7 +988,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   value: _selectedPaymentMethod,
                                   icon: const Icon(
                                     Icons.keyboard_arrow_down,
-                                    color: Color(0xFF1E8858),
+                                    color: Colors.blue,
                                   ),
                                   onChanged: (String? newValue) {
                                     setState(() {
@@ -824,7 +1003,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                           value,
                                           style: const TextStyle(
                                             fontSize: 13,
-                                            color: Color(0xFF1E8858),
+                                            color: Colors.blue,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -843,42 +1022,58 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                         flex: 3,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF1976D2), Color(0xFF2196F3)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0xFF0A2342).withOpacity(0.13),
+                                blurRadius: 16,
+                                offset: Offset(0, 6),
+                              ),
+                            ],
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           margin: const EdgeInsets.only(right: 10),
                           child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Text(
                                     'Rs ',
-                                    style: const TextStyle(
-                                      color: Color(0xFF1E8858),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
+                                    style: GoogleFonts.urbanist(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight:
+                                          FontWeight.bold, // ensure bold
+                                      letterSpacing: 0.5,
                                     ),
                                   ),
-                                  Text(
-                                    totalAmount(context).toStringAsFixed(2),
-                                    style: const TextStyle(
-                                      color: Color(0xFF1E8858),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
+                                  Flexible(
+                                    child: _shimmerTotal(
+                                      totalAmount(context).toStringAsFixed(2),
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Party Discount:0%',
-                                style: TextStyle(
-                                  color: Color(0xFF1E8858),
-                                  fontSize: 12,
+                              const SizedBox(height: 2),
+                              Text(
+                                'Discount:0%',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontSize: 11, // slightly reduced
                                 ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
@@ -897,18 +1092,28 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     children: [
                       // Header row
                       Container(
-                        margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                        margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(8),
-                            topRight: Radius.circular(8),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0xFF64B5F6), // lighter blue at top
+                              Color(0xFF1976D2), // deeper blue at bottom
+                            ],
                           ),
-                          border: Border.all(color: Colors.grey.shade200),
+                          borderRadius: BorderRadius.zero,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0xFF1976D2).withOpacity(0.08),
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: Row(
                           children: [
@@ -920,7 +1125,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.grey.shade800,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -933,7 +1138,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.grey.shade800,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -946,7 +1151,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.grey.shade800,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -959,7 +1164,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                   fontWeight: FontWeight.w600,
                                   fontSize: 12,
                                   letterSpacing: 0.3,
-                                  color: Colors.grey.shade800,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -969,20 +1174,18 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       // Cart list
                       Expanded(
                         child: Container(
-                          margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: const BorderRadius.only(
-                              bottomLeft: Radius.circular(8),
-                              bottomRight: Radius.circular(8),
+                              bottomLeft: Radius.circular(18),
+                              bottomRight: Radius.circular(18),
                             ),
-                            border: Border.all(color: Colors.grey.shade200),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.grey.shade100,
-                                spreadRadius: 1,
-                                blurRadius: 3,
-                                offset: const Offset(0, 1),
+                                color: Color(0xFF1976D2).withOpacity(0.04),
+                                blurRadius: 8,
+                                offset: Offset(0, 2),
                               ),
                             ],
                           ),
@@ -1000,250 +1203,348 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     // Input fields row
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8.0,
-                        vertical: 3.0,
+                        horizontal: 12.0,
+                        vertical: 0.0,
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: Container(
-                              height: 47,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.grey.shade300,
-                                    spreadRadius: 2,
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: TextField(
-                                controller: itemNameController,
-                                keyboardType: TextInputType.text,
-                                decoration: InputDecoration(
-                                  hintText: _getDefaultItemName(),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeInOut,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.blue.withOpacity(0.10),
+                                  blurRadius: 16,
+                                  offset: Offset(0, 4),
                                 ),
+                              ],
+                              border: Border.all(
+                                color: Colors.blue.withOpacity(0.08),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            flex: 1,
-                            child: Container(
-                              height: 47,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.grey.shade300,
-                                    spreadRadius: 2,
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: Container(
+                                    height: 47,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.grey.shade300,
+                                          spreadRadius: 2,
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: TextField(
+                                      controller: itemNameController,
+                                      keyboardType: TextInputType.text,
+                                      decoration: InputDecoration(
+                                        hintText: _getDefaultItemName(),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 14,
+                                            ),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                    ),
                                   ),
-                                ],
-                              ),
-                              child: TextField(
-                                readOnly: true,
-                                controller: priceController,
-                                focusNode: priceFocus,
-                                onTap: () => _showCalculator(false),
-                                cursorWidth: 2,
-                                cursorHeight: 24,
-                                cursorColor: Colors.blue,
-                                showCursor: true,
-                                style: const TextStyle(fontSize: 16),
-                                decoration: InputDecoration(
-                                  hintText: 'eg: 100',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 14,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
                                 ),
-                              ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  flex: 1,
+                                  child: Container(
+                                    height: 47,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.grey.shade300,
+                                          spreadRadius: 2,
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: TextField(
+                                      readOnly: true,
+                                      controller: priceController,
+                                      focusNode: priceFocus,
+                                      onTap: () => _showCalculator(false),
+                                      cursorWidth: 2,
+                                      cursorHeight: 24,
+                                      cursorColor: Colors.blue,
+                                      showCursor: true,
+                                      style: const TextStyle(fontSize: 16),
+                                      decoration: InputDecoration(
+                                        hintText: 'eg: 100',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 14,
+                                            ),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  flex: 1,
+                                  child: Container(
+                                    height: 47,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.grey.shade300,
+                                          spreadRadius: 2,
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: TextField(
+                                      readOnly: true,
+                                      controller: quantityController,
+                                      focusNode: quantityFocus,
+                                      onTap: () => _showCalculator(true),
+                                      cursorWidth: 2,
+                                      cursorHeight: 24,
+                                      cursorColor: Colors.blue,
+                                      showCursor: true,
+                                      textAlign: TextAlign.left,
+                                      style: const TextStyle(fontSize: 16),
+                                      decoration: InputDecoration(
+                                        hintText: 'eg: 2',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 14,
+                                            ),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            flex: 1,
-                            child: Container(
-                              height: 47,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.grey.shade300,
-                                    spreadRadius: 2,
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: TextField(
-                                readOnly: true,
-                                controller: quantityController,
-                                focusNode: quantityFocus,
-                                onTap: () => _showCalculator(true),
-                                cursorWidth: 2,
-                                cursorHeight: 24,
-                                cursorColor: Colors.blue,
-                                showCursor: true,
-                                textAlign: TextAlign.left,
-                                style: const TextStyle(fontSize: 16),
-                                decoration: InputDecoration(
-                                  hintText: 'eg: 2',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // First 5 rows using GridView
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: 20,
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 4,
-                                  crossAxisSpacing: 8,
-                                  mainAxisSpacing: 8,
-                                  childAspectRatio:
-                                      1.7, // Wider but still tall enough
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(6),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.blue.withOpacity(0.08),
+                                  blurRadius: 16,
+                                  offset: Offset(0, 4),
                                 ),
-                            itemBuilder: (context, index) {
-                              final List<String> buttonTexts = [
-                                'A',
-                                'B',
-                                'C',
-                                'D',
-                                'Del',
-                                'AC',
-                                '%',
-                                '÷',
-                                '7',
-                                '8',
-                                '9',
-                                '*',
-                                '4',
-                                '5',
-                                '6',
-                                '-',
-                                '1',
-                                '2',
-                                '3',
-                                '+',
-                              ];
-                              final String buttonText = buttonTexts[index];
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                GridView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: 20,
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 4,
+                                        crossAxisSpacing: 6,
+                                        mainAxisSpacing: 6,
+                                        childAspectRatio:
+                                            1.7, // Wider but still tall enough
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final List<String> buttonTexts = [
+                                      'A',
+                                      'B',
+                                      'C',
+                                      'D',
+                                      'Del',
+                                      'AC',
+                                      '%',
+                                      '÷',
+                                      '7',
+                                      '8',
+                                      '9',
+                                      '*',
+                                      '4',
+                                      '5',
+                                      '6',
+                                      '-',
+                                      '1',
+                                      '2',
+                                      '3',
+                                      '+',
+                                    ];
+                                    final String buttonText =
+                                        buttonTexts[index];
 
-                              // Add visual feedback for pending shortcuts
-                              Color bgColor = _getButtonColor(buttonText);
-                              if (_pendingShortcut != null &&
-                                  buttonText == _pendingShortcut) {
-                                bgColor = Colors
-                                    .green
-                                    .shade700; // Highlight active shortcut button
-                              }
+                                    // Add visual feedback for pending shortcuts
+                                    Color bgColor = _getButtonColor(buttonText);
+                                    if (_pendingShortcut != null &&
+                                        buttonText == _pendingShortcut) {
+                                      bgColor = Colors
+                                          .green
+                                          .shade700; // Highlight active shortcut button
+                                    }
 
-                              return _buildCalculatorButton(
-                                buttonText,
-                                bgColor,
-                                _getTextColor(buttonText),
-                              );
-                            },
+                                    return _buildCalculatorButton(
+                                      buttonText,
+                                      bgColor,
+                                      _getTextColor(buttonText),
+                                    );
+                                  },
+                                ),
+
+                                const SizedBox(height: 12),
+
+                                // Last row with 3 buttons (., 0, Enter)
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      height: 50,
+                                      width: 75,
+                                      child: _buildCalculatorButton(
+                                        '.',
+                                        Colors.grey.shade200,
+                                        Colors.white, // Changed to white
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    SizedBox(
+                                      height: 50,
+                                      width: 75,
+                                      child: _buildCalculatorButton(
+                                        '0',
+                                        const Color(0xFFEEEEEE), // Grey for 0
+                                        Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: MouseRegion(
+                                        onEnter: (_) => setState(
+                                          () => _pressedButton = 'Enter',
+                                        ),
+                                        onExit: (_) => setState(
+                                          () => _pressedButton = null,
+                                        ),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(
+                                            milliseconds: 120,
+                                          ),
+                                          curve: Curves.easeInOut,
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                Color(0xFF1976D2),
+                                                Color(0xFF2196F3),
+                                              ],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            boxShadow: [
+                                              if (_pressedButton == 'Enter')
+                                                BoxShadow(
+                                                  color: Colors.blueAccent
+                                                      .withOpacity(0.4),
+                                                  blurRadius: 18,
+                                                  spreadRadius: 2,
+                                                  offset: Offset(0, 0),
+                                                ),
+                                            ],
+                                          ),
+                                          child: ElevatedButton(
+                                            onPressed: addBillItem,
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor:
+                                                  Colors.transparent,
+                                              shadowColor: Colors.transparent,
+                                              elevation: 0,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 10,
+                                                  ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(16),
+                                              ),
+                                            ),
+                                            child: const Text(
+                                              'Enter',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 1.1,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
-
-                          const SizedBox(height: 10),
-
-                          // Last row with 3 buttons (., 0, Enter)
-                          Row(
-                            children: [
-                              SizedBox(
-                                height: 50,
-                                width: 75,
-                                child: _buildCalculatorButton(
-                                  '.',
-                                  Colors.grey.shade200,
-                                  Colors.black,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                height: 50,
-                                width: 75,
-                                child: _buildCalculatorButton(
-                                  '0',
-                                  const Color(0xFFFFEB3B),
-                                  Colors.black,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                height: 50,
-                                width: 166,
-                                child: ElevatedButton(
-                                  onPressed: addBillItem,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green.shade600,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 10,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    elevation: 4,
-                                    shadowColor: Colors.black38,
-                                  ),
-                                  child: const Text(
-                                    'Enter',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
@@ -1251,130 +1552,155 @@ class _CalculatorScreenState extends State<CalculatorScreen>
               ],
             ),
 
-            bottomNavigationBar: BottomAppBar(
-              elevation: 15,
-              color: Color(0xFF128C7E),
+            bottomNavigationBar: Container(
               height: 60,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Search toggle button
-                        Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 40,
-                              minHeight: 40,
-                            ),
-                            icon: Icon(
-                              _isSearchVisible ? Icons.close : Icons.search,
-                              color: Colors.white,
-                              size: 22,
-                            ),
-                            onPressed: _toggleSearch,
-                          ),
-                        ),
-                        // Search field with animation
-                        SizeTransition(
-                          sizeFactor:
-                              _searchAnimation ??
-                              const AlwaysStoppedAnimation(0.0),
-                          axis: Axis.horizontal,
-                          child: Container(
-                            width: 140, // Increased width
-                            height: 40,
-                            margin: const EdgeInsets.only(right: 2),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1976D2), Color(0xFF2196F3)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(22),
+                  topRight: Radius.circular(22),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0xFF1976D2).withOpacity(0.13),
+                    blurRadius: 16,
+                    offset: Offset(0, -6),
+                  ),
+                ],
+              ),
+              child: BottomAppBar(
+                elevation: 0,
+                color: Colors.white, // Use transparent to show gradient
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Search toggle button
+                          Container(
+                            margin: const EdgeInsets.only(right: 4),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(8),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.shade200,
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
                             ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _searchController,
-                                    onChanged: _handleSearch,
-                                    decoration: InputDecoration(
-                                      hintText: "Search items...",
-                                      hintStyle: TextStyle(
-                                        color: Colors.grey.shade600,
-                                        fontSize: 13,
-                                      ),
-                                      border: InputBorder.none,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 10,
-                                          ),
-                                      isDense: true,
-                                    ),
-                                  ),
-                                ),
-                                if (_searchController.text.isNotEmpty)
-                                  SizedBox(
-                                    width: 32,
-                                    height: 32,
-                                    child: IconButton(
-                                      icon: Icon(
-                                        Icons.close,
-                                        size: 18,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                        _handleSearch('');
-                                      },
-                                      padding: EdgeInsets.zero,
-                                    ),
-                                  ),
-                              ],
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 40,
+                                minHeight: 40,
+                              ),
+                              icon: Icon(
+                                _isSearchVisible ? Icons.close : Icons.search,
+                                color: Colors.blue,
+                                size: 22,
+                              ),
+                              onPressed: _toggleSearch,
                             ),
                           ),
+                          // Search field with animation
+                          SizeTransition(
+                            sizeFactor:
+                                _searchAnimation ??
+                                const AlwaysStoppedAnimation(0.0),
+                            axis: Axis.horizontal,
+                            child: Container(
+                              width: 140, // Increased width
+                              height: 40,
+                              margin: const EdgeInsets.only(right: 2),
+                              decoration: BoxDecoration(
+                                color: Colors
+                                    .blue
+                                    .shade50, // blue 50 as inner color
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Color(0xFF0A2342).withOpacity(0.13),
+                                    blurRadius: 16,
+                                    offset: Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _searchController,
+                                      onChanged: _handleSearch,
+                                      decoration: InputDecoration(
+                                        hintText: "Search items...",
+                                        hintStyle: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 13,
+                                        ),
+                                        border: InputBorder.none,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                        isDense: true,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_searchController.text.isNotEmpty)
+                                    SizedBox(
+                                      width: 32,
+                                      height: 32,
+                                      child: IconButton(
+                                        icon: Icon(
+                                          Icons.close,
+                                          size: 18,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          _handleSearch('');
+                                        },
+                                        padding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: _handleCreateBill,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.blue,
+                          elevation: 5,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ), // Reduced padding
+                          minimumSize: Size(0, 32), // Reduced minimum height
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
                         ),
-                      ],
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: _handleCreateBill,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.green,
-                        elevation: 5,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ), // Reduced padding
-                        minimumSize: Size(0, 32), // Reduced minimum height
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
+                        icon: Icon(
+                          Icons.receipt_long,
+                          size: 18,
+                        ), // Reduced icon size
+                        label: Text(
+                          "Create Bill",
+                          style: TextStyle(fontSize: 13), // Reduced font size
                         ),
                       ),
-                      icon: Icon(
-                        Icons.receipt_long,
-                        size: 18,
-                      ), // Reduced icon size
-                      label: Text(
-                        "Create Bill",
-                        style: TextStyle(fontSize: 13), // Reduced font size
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1389,7 +1715,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   // Calculator button builder
   Widget _buildCalculatorButton(String label, Color bgColor, Color textColor) {
-    final bool isOperator = ['+', '-', '*', '÷', '%', '.'].contains(label);
+    final bool isOperator = ['+', '-', '*', '÷', '%'].contains(label);
     final bool isShortcutKey = ['A', 'B', 'C', 'D'].contains(label);
     final bool isNumber = RegExp(r'^[0-9]$').hasMatch(label);
     final bool isActiveShortcut =
@@ -1401,34 +1727,77 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         label == _shortcutBuffer[_shortcutBuffer.length - 1];
 
     // Highlight shortcut and number buttons during shortcut entry
+    Color effectiveBg = bgColor;
+    Color effectiveText = textColor;
     if (_shortcutBuffer.isNotEmpty) {
       if (isShortcutKey && isActiveShortcut) {
-        bgColor = Colors.green.shade700;
-        textColor = Colors.white;
+        effectiveBg = Colors.blue.shade700; // vibrant blue for pressed shortcut
+        effectiveText = Colors.white;
       } else if (isNumber && isActiveNumber) {
-        bgColor = Colors.green.shade100;
+        effectiveBg = Colors.blue.shade100;
       } else if (isShortcutKey || isNumber) {
-        bgColor = Colors.grey.shade300;
+        effectiveBg = Colors.grey.shade300;
       }
     }
 
-    return ElevatedButton(
-      onPressed: () => _onCalculatorButtonPressed(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: bgColor,
-        foregroundColor: textColor,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        elevation: isActiveShortcut || isActiveNumber ? 8 : 4,
-        shadowColor: isActiveShortcut ? Colors.green : Colors.black38,
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: isOperator ? 20 : 14,
-          fontWeight: isActiveShortcut || isActiveNumber || isOperator
-              ? FontWeight.w600
-              : FontWeight.w500,
+    // Use operator gradient for operator and AC buttons
+    BoxDecoration? customGradient;
+    final bool isDot = label == '.';
+    if (isOperator || label == 'AC' || isDot) {
+      customGradient = const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF1976D2), Color(0xFF64B5F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      );
+      effectiveBg = Colors.transparent;
+    }
+
+    return GestureDetector(
+      onTap: () => _onCalculatorButtonPressed(label), // <-- Add this line
+      onTapDown: (_) => setState(() => _pressedButton = label),
+      onTapUp: (_) => setState(() => _pressedButton = null),
+      onTapCancel: () => setState(() => _pressedButton = null),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOut,
+        transform: (_pressedButton == label)
+            ? (Matrix4.identity()..scale(0.96))
+            : Matrix4.identity(),
+        decoration:
+            customGradient ??
+            BoxDecoration(
+              color: effectiveBg.withOpacity(
+                _pressedButton == label ? 0.85 : 1.0,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                if (_pressedButton != label)
+                  BoxShadow(
+                    color: Colors.blue.withOpacity(0.08),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+              ],
+            ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: isOperator ? 22 : 16,
+              fontWeight: FontWeight.bold,
+              color: effectiveText,
+              shadows: [
+                Shadow(
+                  color: Colors.white.withOpacity(0.2),
+                  blurRadius: 2,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1439,22 +1808,22 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_bag_outlined, size: 60, color: Colors.grey[400]),
-          const SizedBox(height: 10),
+          Icon(Icons.shopping_bag_outlined, size: 36, color: Colors.grey[400]),
+          const SizedBox(height: 12),
           const Text(
             'Your cart is empty',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               color: Colors.grey,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Text(
             'Add items to create a bill',
             style: TextStyle(
-              fontSize: 16,
-              color: Color(0xFF128C7E),
+              fontSize: 13,
+              color: Colors.blue,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1464,8 +1833,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   Widget _buildListItem(BuildContext context, BillItem item, int index) {
+    // Use a composite key for Dismissible to avoid issues with null id
+    final dismissKey = item.id != null
+        ? ValueKey('billitem_${item.id}')
+        : ValueKey(
+            'billitem_${item.name}_${item.price}_${item.quantity}_${item.serialNo}',
+          );
     return Dismissible(
-      key: ValueKey(item.id),
+      key: dismissKey,
       direction: DismissDirection.endToStart,
       confirmDismiss: (_) => _confirmDeletion(context, item.name),
       background: Container(
@@ -1475,8 +1850,26 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       onDismissed: (direction) {
-        context.read<SalesCubit>().removeItem(item);
-        itemNameController.text = _getDefaultItemName();
+        // If id is null, remove by matching all fields
+        final cubit = context.read<SalesCubit>();
+        if (item.id == null) {
+          cubit.removeItemByFields(
+            item.name,
+            item.price,
+            item.quantity,
+            item.serialNo,
+          );
+        } else {
+          cubit.removeItem(item);
+        }
+        // Update itemNameController to next default name
+        final state = cubit.state;
+        if (state is SalesUpdated && state.items.isNotEmpty) {
+          final nextIdx = state.items.length + 1;
+          itemNameController.text = 'Item $nextIdx';
+        } else {
+          itemNameController.text = 'Item 1';
+        }
       },
       child: InkWell(
         onTap: () {
@@ -1556,9 +1949,11 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.teal.shade50,
+                      color: const Color(0xFF1976D2).withOpacity(0.13),
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.teal.shade100),
+                      border: Border.all(
+                        color: const Color(0xFF1976D2).withOpacity(0.25),
+                      ),
                     ),
                     child: Text(
                       '${item.price.toStringAsFixed(0)} × ${item.quantity.toStringAsFixed(0)}',
@@ -1682,7 +2077,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           quantity: double.parse(quantityValue),
         );
 
-        await _billRepository.insertBillItem(newItem);
+        await context.read<SalesCubit>().addBillItem(newItem);
       }
 
       clearInputs();
@@ -1724,17 +2119,57 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       return;
     }
 
-    final salesCubit = context.read<SalesCubit>();
-    final inv = salesCubit.getInventoryItemByShortcut(
-      '${result.category}${result.code}',
+    // Use inventory from InventoryCubit
+    final inventoryState = context.read<InventoryCubit>().state;
+    List inventoryList = [];
+    if (inventoryState is InventoryLoaded) {
+      inventoryList = inventoryState.items
+          .where((i) => i.isSold == false)
+          .toList();
+    }
+    final InventoryItem? inv = inventoryList.cast<InventoryItem?>().firstWhere(
+      (item) =>
+          (item?.shortcut ?? '').toUpperCase() ==
+          ('${result.category}${result.code}').toUpperCase(),
+      orElse: () => null,
     );
 
     if (inv != null) {
-      // Only update the input fields and shortcut UI
+      // Check if item is out of stock
+      if (inv.quantity <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Out of stock! ${inv.name} has no items available.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        _shortcutBuffer = '';
+        _shortcutEntryTimer?.cancel();
+        setState(() {}); // Only update shortcut UI
+        return;
+      }
+
+      // Check if requested quantity exceeds available stock
+      final requestedQuantity = result.quantity ?? 1.0;
+      if (requestedQuantity > inv.quantity) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Insufficient stock! ${inv.name} has only ${inv.quantity.toStringAsFixed(0)} items available. You cannot add more than ${inv.quantity.toStringAsFixed(0)} items.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        _shortcutBuffer = '';
+        _shortcutEntryTimer?.cancel();
+        setState(() {}); // Only update shortcut UI
+        return;
+      }
+
       itemNameController.text = inv.name;
       priceValue = inv.price.toStringAsFixed(0);
       priceController.text = priceValue;
-      quantityValue = result.quantity?.toStringAsFixed(0) ?? '1';
+      quantityValue = requestedQuantity.toStringAsFixed(0);
       quantityController.text = quantityValue;
       setState(() {}); // Only update shortcut UI
     } else {
@@ -1766,19 +2201,33 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
 /// Determines button background color
 Color _getButtonColor(String label) {
-  if (['A', 'B', 'C', 'D'].contains(label)) return const Color(0xFF4CAF50);
-  if (label == 'Del') return const Color(0xFFEF9A9A);
-  if (label == 'AC') return Colors.grey.shade300;
-  if (int.tryParse(label) != null) return const Color(0xFFFFEB3B);
-  if (['+', '-', 'x', '÷', '%'].contains(label)) {
-    return Colors.grey.shade300;
+  // Updated palette per user request
+  if (["A", "B", "C", "D"].contains(label))
+    return const Color(0xFFBBDEFB); // Light blue for shortcuts
+  if (label == "Del")
+    return const Color(0xFFD32F2F); // Medium strong red for delete
+  if (label == "AC")
+    return Colors.transparent; // Use gradient for AC, handled in builder
+  if (int.tryParse(label) != null)
+    return const Color(0xFFEEEEEE); // Grey for digits
+  if (["+", "-", "*", "÷", "%"].contains(label)) {
+    return const Color(0xFFBBDEFB); // Light blue for operators
   }
-  return Colors.grey.shade200;
+  if (label == ".") return const Color(0xFF1976D2); // Blue for dot
+  return const Color(0xFFE3F2FD); // Default very light blue
 }
 
 /// Determines text color
 Color _getTextColor(String label) {
-  return ['A', 'B', 'C', 'D'].contains(label) ? Colors.white : Colors.black87;
+  if (["A", "B", "C", "D"].contains(label))
+    return const Color(0xFF1976D2); // Blue text for shortcuts
+  if (["Del"].contains(label)) return Colors.white;
+  if (["AC"].contains(label)) return Colors.white; // White for AC
+  if (["+", "-", "*", "÷", "%"].contains(label))
+    return Colors.white; // White text for operators
+  if (int.tryParse(label) != null) return Colors.black87; // Black for digits
+  if (label == ".") return Colors.white; // White for dot
+  return const Color(0xFF1976D2);
 }
 
 // --- Refactored Cart List Widget ---
@@ -1824,22 +2273,22 @@ class CartListView extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_bag_outlined, size: 60, color: Colors.grey[400]),
-          const SizedBox(height: 10),
+          Icon(Icons.shopping_bag_outlined, size: 36, color: Colors.grey[400]),
+          const SizedBox(height: 12),
           const Text(
             'Your cart is empty',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               color: Colors.grey,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Text(
             'Add items to create a bill',
             style: TextStyle(
-              fontSize: 16,
-              color: Color(0xFF128C7E),
+              fontSize: 13,
+              color: Colors.blue,
               fontWeight: FontWeight.w500,
             ),
           ),

@@ -1,5 +1,6 @@
 class BillItem {
   final int? id;
+  final int? billId;
   final int serialNo;
   final String name;
   final double price;
@@ -9,6 +10,7 @@ class BillItem {
 
   BillItem({
     this.id,
+    this.billId,
     required this.serialNo,
     required this.name,
     required this.price,
@@ -22,6 +24,7 @@ class BillItem {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'billId': billId,
       'serialNo': serialNo,
       'name': name,
       'price': price,
@@ -42,11 +45,16 @@ class BillItem {
     }
 
     return BillItem(
-      id: map['id'] as int?,
+      id: map['id'] is int
+          ? map['id'] as int
+          : int.tryParse(map['id'].toString()),
+      billId: map['billId'] is int
+          ? map['billId'] as int
+          : int.tryParse(map['billId'].toString()),
       serialNo: map['serialNo'] is int
           ? map['serialNo'] as int
           : int.tryParse(map['serialNo'].toString()) ?? 0,
-      name: map['name'] as String,
+      name: map['name'] as String? ?? map['itemName'] as String? ?? '',
       price: parseDouble(map['price']),
       quantity: parseDouble(map['quantity']),
       createdAt: map['createdAt'] != null
@@ -60,6 +68,7 @@ class BillItem {
 
   BillItem copyWith({
     int? id,
+    int? billId,
     int? serialNo,
     String? name,
     double? price,
@@ -69,6 +78,7 @@ class BillItem {
   }) {
     return BillItem(
       id: id ?? this.id,
+      billId: billId ?? this.billId,
       serialNo: serialNo ?? this.serialNo,
       name: name ?? this.name,
       price: price ?? this.price,

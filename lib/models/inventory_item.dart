@@ -6,6 +6,7 @@ class InventoryItem {
   final double initialQuantity;
   final String? shortcut;
   final DateTime? createdAt;
+  final bool isSold; // Add this field
 
   InventoryItem({
     this.id,
@@ -15,6 +16,7 @@ class InventoryItem {
     double? initialQuantity,
     this.shortcut,
     this.createdAt,
+    this.isSold = false, // Default to false
   }) : initialQuantity = initialQuantity ?? quantity;
 
   Map<String, dynamic> toMap() {
@@ -27,6 +29,7 @@ class InventoryItem {
       'shortcut': shortcut,
       'createdAt':
           createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
+      'isSold': isSold ? 1 : 0,
     };
   }
 
@@ -52,8 +55,11 @@ class InventoryItem {
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'].toString())
           : null,
+      isSold: map['isSold'] == 1 || map['isSold'] == true,
     );
   }
+
+  get stockQuantity => null;
 
   InventoryItem copyWith({
     int? id,
@@ -63,6 +69,7 @@ class InventoryItem {
     double? initialQuantity,
     String? shortcut,
     DateTime? createdAt,
+    bool? isSold,
   }) {
     return InventoryItem(
       id: id ?? this.id,
@@ -72,6 +79,7 @@ class InventoryItem {
       initialQuantity: initialQuantity ?? this.initialQuantity,
       shortcut: shortcut ?? this.shortcut,
       createdAt: createdAt ?? this.createdAt,
+      isSold: isSold ?? this.isSold,
     );
   }
 }
