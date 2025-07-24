@@ -8,6 +8,8 @@ import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
 import '../utils/app_theme.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import './Calculator.dart';
+import 'package:forward_billing_app/screens/Calculator.dart';
 
 String formatIndianAmount(num amount) {
   if (amount.abs() >= 10000000) {
@@ -369,20 +371,20 @@ class _SalesScreenState extends State<SalesScreen>
       }
     }
     return Scaffold(
-      backgroundColor: kWhite,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
         centerTitle: true,
         title: Text(
           'Sales Management',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
-            color: Color(0xFF0A2342),
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342),
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
           ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+        iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342)),
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -526,89 +528,89 @@ class _SalesScreenState extends State<SalesScreen>
 
                 // Enhanced Search & Filter
                 Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: kWhite,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: kGrey500.withAlpha(25),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
                       ),
-                      decoration: BoxDecoration(
-                        color: kWhite,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: kGrey500.withAlpha(25),
-                            spreadRadius: 1,
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                        border: Border.all(color: kLightBorder, width: 1),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              decoration: InputDecoration(
+                    ],
+                    border: Border.all(color: kLightBorder, width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          decoration: InputDecoration(
                                 hintText:
                                     'Search by customer, bill #, or item...',
-                                hintStyle: TextStyle(
-                                  color: kGrey500,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.search_rounded,
-                                  color: kBlue,
-                                  size: 20,
-                                ),
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                              ),
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              onChanged: (val) {
-                                setState(() {
-                                  _searchQuery = val;
-                                  _applyFilters();
-                                });
-                              },
+                            hintStyle: TextStyle(
+                              color: kGrey500,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: kBlue,
+                              size: 20,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Material(
-                            color: kBlue,
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: _showFilterDialog,
-                              child: Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Color(0xFF0A2342),
-                                      Color(0xFF123060),
-                                      Color(0xFF1976D2),
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(
-                                  Icons.filter_alt_rounded,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
-                        ],
+                          onChanged: (val) {
+                            setState(() {
+                              _searchQuery = val;
+                              _applyFilters();
+                            });
+                          },
+                        ),
                       ),
+                      const SizedBox(width: 8),
+                      Material(
+                        color: kBlue,
+                        borderRadius: BorderRadius.circular(10),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: _showFilterDialog,
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Color(0xFF0A2342),
+                                  Color(0xFF123060),
+                                  Color(0xFF1976D2),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.filter_alt_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                     )
                     .animate()
                     .fade(delay: 200.ms, duration: 400.ms)
@@ -647,7 +649,12 @@ class _SalesScreenState extends State<SalesScreen>
                             ),
                           ),
                         )
-                      : ListView.separated(
+                      : InteractiveViewer(
+                          panEnabled: true,
+                          scaleEnabled: true,
+                          minScale: 1.0,
+                          maxScale: 3.0,
+                          child: ListView.separated(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           itemCount: _filteredBills.length,
                           separatorBuilder: (_, __) =>
@@ -981,7 +988,7 @@ class _SalesScreenState extends State<SalesScreen>
                                                           horizontal: 4,
                                                         ),
                                                     decoration: BoxDecoration(
-                                                      color: kWhite,
+                                                      color: Theme.of(context).brightness == Brightness.dark ? Color(0xFF232A36) : Colors.white,
                                                       borderRadius:
                                                           BorderRadius.circular(
                                                             8,
@@ -1131,8 +1138,9 @@ class _SalesScreenState extends State<SalesScreen>
                                   ),
                                 ],
                               ),
-                            ).animate().fade(delay: (100 * idx).ms).slideY(begin: 0.5);
+                              ).animate().fade(delay: (100 * idx).ms).slideY(begin: 0.5);
                           },
+                          ),
                         ),
                 ),
               ],
@@ -1158,8 +1166,10 @@ class _SalesScreenState extends State<SalesScreen>
         child: IconButton(
           icon: Icon(Icons.add, color: Colors.white, size: 32),
           onPressed: () {
-            // Ensure this navigates to the calculator screen
-            Navigator.pushNamed(context, '/Calculator_screen');
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const CalculatorScreen()),
+            );
           },
           tooltip: 'Add Bill',
         ),

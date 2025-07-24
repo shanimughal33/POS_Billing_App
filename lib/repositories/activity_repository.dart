@@ -42,6 +42,7 @@ class ActivityRepository {
       activity.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    Activity.notifyNewActivity(activity);
   }
 
   Future<List<Activity>> getRecentActivities({int limit = 20}) async {
@@ -52,6 +53,19 @@ class ActivityRepository {
       limit: limit,
     );
     return maps.map((m) => Activity.fromMap(m)).toList();
+  }
+
+  Stream<List<Activity>> getRecentActivitiesStream({int limit = 20}) async* {
+    while (true) {
+      final db = await database;
+      final maps = await db.query(
+        'activities',
+        orderBy: 'timestamp DESC',
+        limit: limit,
+      );
+      yield maps.map((m) => Activity.fromMap(m)).toList();
+      await Future.delayed(const Duration(seconds: 1));
+    }
   }
 
   Future<List<Activity>> getAllActivities() async {

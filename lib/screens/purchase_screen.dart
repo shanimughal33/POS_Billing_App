@@ -165,25 +165,25 @@ class _PurchaseViewState extends State<PurchaseView> {
             ),
             child:
                 TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      onChanged: _search,
-                      style: const TextStyle(fontSize: 16),
-                      decoration: InputDecoration(
-                        hintText: 'Search items...',
-                        hintStyle: TextStyle(color: Colors.grey[400]),
-                        prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: kCardBg,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              onChanged: _search,
+              style: const TextStyle(fontSize: 16),
+              decoration: InputDecoration(
+                hintText: 'Search items...',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: kCardBg,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
                     )
                     .animate()
                     .fade(delay: 200.ms, duration: 400.ms)
@@ -194,14 +194,20 @@ class _PurchaseViewState extends State<PurchaseView> {
           Expanded(
             child: items.isEmpty
                 ? _buildEmptyState()
-                : ListView.builder(
+                : InteractiveViewer(
+                    panEnabled: true,
+                    scaleEnabled: true,
+                    minScale: 1.0,
+                    maxScale: 3.0,
+                    child: ListView.builder(
                     controller: _scrollController,
                     itemCount: items.length,
                     itemBuilder: (context, index) =>
-                        _buildItemCard(items[index])
-                            .animate()
-                            .fade(delay: (100 * index).ms)
-                            .slideY(begin: 0.5),
+                          _buildItemCard(items[index])
+                              .animate()
+                              .fade(delay: (100 * index).ms)
+                              .slideY(begin: 0.5),
+                    ),
                   ),
           ),
         ],
@@ -398,8 +404,8 @@ class _PurchaseViewState extends State<PurchaseView> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: kCardBg,
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(16),
             topRight: Radius.circular(16),
@@ -420,10 +426,10 @@ class _PurchaseViewState extends State<PurchaseView> {
               children: [
                 Text(
                   item == null ? 'Add New Item' : 'Edit Item',
-                  style: const TextStyle(
-                    fontSize: 20,
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
                     fontWeight: FontWeight.bold,
-                    color: kBlue,
+                    fontSize: 20,
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -434,45 +440,58 @@ class _PurchaseViewState extends State<PurchaseView> {
                     labelText: 'Item Name',
                     hintText: 'Enter item name',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return 'Please enter item name';
+                    }
+                    final pattern = RegExp(r'^[a-zA-Z0-9\-\s]{2,50}$');
+                    if (!pattern.hasMatch(value.trim())) {
+                      return '2-50 letters, numbers, spaces, or dashes only';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: priceController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Price (₨)',
                     hintText: 'Enter price',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
@@ -481,43 +500,51 @@ class _PurchaseViewState extends State<PurchaseView> {
                     }
                     final price = double.tryParse(value);
                     if (price == null || price <= 0) {
-                      return 'Please enter a valid price';
+                      return 'Please enter a valid price (>0)';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: quantityController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
                   decoration: InputDecoration(
                     labelText: 'Quantity',
                     hintText: 'Enter quantity',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter quantity';
                     }
-                    final quantity = double.tryParse(value);
-                    if (quantity == null || quantity < 0) {
-                      return 'Please enter a valid quantity';
+                    final quantity = int.tryParse(value);
+                    if (quantity == null || quantity <= 0) {
+                      return 'Please enter a valid quantity (>0, integer)';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -526,16 +553,18 @@ class _PurchaseViewState extends State<PurchaseView> {
                     labelText: 'Shortcut (Optional)',
                     hintText: 'Enter shortcut code',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
@@ -571,6 +600,9 @@ class _PurchaseViewState extends State<PurchaseView> {
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 Row(
@@ -578,19 +610,19 @@ class _PurchaseViewState extends State<PurchaseView> {
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
+                      child: Text('Cancel', style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2))),
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Color(0xFF1976D2),
+                        backgroundColor: Color(0xFF1976D2),
+                        foregroundColor: Colors.white,
                         textStyle: const TextStyle(fontWeight: FontWeight.bold),
                         side: BorderSide.none,
                       ),
                       child: Text(
                         'Save',
-                        style: TextStyle(color: Color(0xFF1976D2)),
+                        style: TextStyle(color: Colors.white),
                       ),
                       onPressed: () async {
                         if (formKey.currentState!.validate()) {
@@ -629,10 +661,21 @@ class _PurchaseViewState extends State<PurchaseView> {
     await ActivityRepository().logActivity(
       Activity(
         type: oldItem == null ? 'purchase_add' : 'purchase_edit',
-        description:
-            (oldItem == null ? 'Added' : 'Edited') +
-            ' inventory item: ' +
-            newItem.name,
+        description: (oldItem == null ? 'Added' : 'Edited') + ' purchase item: ' + newItem.name,
+        timestamp: DateTime.now(),
+        metadata: {
+          'id': newItem.id,
+          'name': newItem.name,
+          'price': newItem.price,
+          'quantity': newItem.quantity,
+          'shortcut': newItem.shortcut,
+        },
+      ),
+    );
+    await ActivityRepository().logActivity(
+      Activity(
+        type: oldItem == null ? 'inventory_add' : 'inventory_edit',
+        description: (oldItem == null ? 'Added' : 'Edited') + ' inventory item: ' + newItem.name,
         timestamp: DateTime.now(),
         metadata: {
           'id': newItem.id,
@@ -675,6 +718,14 @@ class _PurchaseViewState extends State<PurchaseView> {
     await ActivityRepository().logActivity(
       Activity(
         type: 'purchase_delete',
+        description: 'Deleted purchase item with id: $id',
+        timestamp: DateTime.now(),
+        metadata: {'id': id},
+      ),
+    );
+    await ActivityRepository().logActivity(
+      Activity(
+        type: 'inventory_delete',
         description: 'Deleted inventory item with id: $id',
         timestamp: DateTime.now(),
         metadata: {'id': id},
@@ -685,20 +736,20 @@ class _PurchaseViewState extends State<PurchaseView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kWhite,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : kWhite,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
         centerTitle: true,
         title: Text(
           'Purchase Management',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
-            color: Color(0xFF0A2342),
+            color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342),
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
           ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+        iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342)),
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),

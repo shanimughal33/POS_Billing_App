@@ -355,6 +355,7 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                       ],
                       lineTouchData: LineTouchData(
                         enabled: true,
+                        handleBuiltInTouches: true,
                         touchSpotThreshold: 20,
                         touchTooltipData: LineTouchTooltipData(
                           tooltipBgColor: isDark

@@ -6,7 +6,7 @@ class InventoryItem {
   final double initialQuantity;
   final String? shortcut;
   final DateTime? createdAt;
-  final bool isSold; // Add this field
+  final bool isSold; // Added isSold property
 
   InventoryItem({
     this.id,
@@ -16,7 +16,7 @@ class InventoryItem {
     double? initialQuantity,
     this.shortcut,
     this.createdAt,
-    this.isSold = false, // Default to false
+    this.isSold = false, // Default value is false
   }) : initialQuantity = initialQuantity ?? quantity;
 
   Map<String, dynamic> toMap() {
@@ -29,7 +29,7 @@ class InventoryItem {
       'shortcut': shortcut,
       'createdAt':
           createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
-      'isSold': isSold ? 1 : 0,
+      'isSold': isSold ? 1 : 0, // Convert bool to int for SQLite
     };
   }
 
@@ -55,7 +55,7 @@ class InventoryItem {
       createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'].toString())
           : null,
-      isSold: map['isSold'] == 1 || map['isSold'] == true,
+      isSold: map['isSold'] == 1, // Convert int to bool from SQLite
     );
   }
 
@@ -69,7 +69,7 @@ class InventoryItem {
     double? initialQuantity,
     String? shortcut,
     DateTime? createdAt,
-    bool? isSold,
+    bool? isSold, // Added isSold to copyWith
   }) {
     return InventoryItem(
       id: id ?? this.id,
@@ -79,7 +79,7 @@ class InventoryItem {
       initialQuantity: initialQuantity ?? this.initialQuantity,
       shortcut: shortcut ?? this.shortcut,
       createdAt: createdAt ?? this.createdAt,
-      isSold: isSold ?? this.isSold,
+      isSold: isSold ?? this.isSold, // Include isSold in copyWith
     );
   }
 }

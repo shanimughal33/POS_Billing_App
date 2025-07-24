@@ -1,8 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/people.dart';
 import '../database/database_helper.dart';
 
-class PeopleRepository {
+class PeopleRepository extends ChangeNotifier {
   final dbHelper = DatabaseHelper.instance;
 
   Future<int> insertPerson(People person) async {

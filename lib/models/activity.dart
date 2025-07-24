@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'dart:async';
 
-class Activity {
+class Activity extends ChangeNotifier {
   final int? id;
   final String type; // e.g., sale, purchase, people_add, people_edit, etc.
   final String description;
@@ -54,5 +55,12 @@ class Activity {
       }
     }
     return {};
+  }
+
+  static final StreamController<Activity> _activityStreamController = StreamController.broadcast();
+  static Stream<Activity> get activityStream => _activityStreamController.stream;
+
+  static void notifyNewActivity(Activity activity) {
+    _activityStreamController.add(activity);
   }
 }

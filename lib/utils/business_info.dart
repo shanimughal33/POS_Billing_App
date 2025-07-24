@@ -29,21 +29,25 @@ class BusinessInfo {
 
   static Future<BusinessInfo> load() async {
     final prefs = await SharedPreferences.getInstance();
+    String taxRate = prefs.getString('taxRate') ?? '0';
+    double defaultDiscount = prefs.getDouble('defaultDiscount') ?? 0.0;
+    String phone = prefs.getString('businessPhone') ?? 'N/A';
+    String customFooter = prefs.getString('customFooter') ?? 'Thank you for your business!';
+
     return BusinessInfo(
       name: prefs.getString('businessName') ?? 'Business Name',
       address: prefs.getString('businessAddress') ?? 'Business Address',
-      phone: prefs.getString('businessPhone') ?? 'Business Phone',
+      phone: phone,
       email: prefs.getString('businessEmail') ?? 'Business Email',
       currency: prefs.getString('currency') ?? 'Rs',
-      taxRate: prefs.getString('taxRate') ?? '0',
+      taxRate: taxRate,
       supportPhone:
           prefs.getString('supportPhone') ??
-          prefs.getString('businessPhone') ??
-          'Support Phone',
+          phone,
       businessLogoPath: prefs.getString('businessLogoPath') ?? '',
-      customFooter: prefs.getString('customFooter') ?? '',
+      customFooter: customFooter,
       enableDiscounts: prefs.getBool('enableDiscounts') ?? true,
-      defaultDiscount: prefs.getDouble('defaultDiscount') ?? 0.0,
+      defaultDiscount: defaultDiscount,
     );
   }
 }

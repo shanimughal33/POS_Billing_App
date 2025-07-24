@@ -21,6 +21,9 @@ import '../models/inventory_item.dart';
 import 'settings_screen.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
+import 'package:flutter/material.dart' show RouteAware, ModalRoute;
+import '../main.dart' show routeObserver;
+import 'package:firebase_auth/firebase_auth.dart';
 
 String formatIndianAmount(num amount) {
   if (amount.abs() >= 10000000) {
@@ -34,10 +37,39 @@ String formatIndianAmount(num amount) {
 }
 
 class DashboardProvider with ChangeNotifier {
-  final BillRepository _billRepo = BillRepository();
-  final InventoryRepository _inventoryRepo = InventoryRepository();
-  final PeopleRepository _peopleRepo = PeopleRepository();
-  final ExpenseRepository _expenseRepo = ExpenseRepository();
+  final BillRepository _billRepo;
+  final InventoryRepository _inventoryRepo;
+  final PeopleRepository _peopleRepo;
+  final ExpenseRepository _expenseRepo;
+
+  DashboardProvider({
+    required BillRepository billRepo,
+    required InventoryRepository inventoryRepo,
+    required PeopleRepository peopleRepo,
+    required ExpenseRepository expenseRepo,
+  })  : _billRepo = billRepo,
+        _inventoryRepo = inventoryRepo,
+        _peopleRepo = peopleRepo,
+        _expenseRepo = expenseRepo {
+    _listenToRepositories();
+    _loadData();
+  }
+
+  void _listenToRepositories() {
+    _billRepo.addListener(_loadData);
+    _inventoryRepo.addListener(_loadData);
+    _peopleRepo.addListener(_loadData);
+    _expenseRepo.addListener(_loadData);
+  }
+
+  @override
+  void dispose() {
+    _billRepo.removeListener(_loadData);
+    _inventoryRepo.removeListener(_loadData);
+    _peopleRepo.removeListener(_loadData);
+    _expenseRepo.removeListener(_loadData);
+    super.dispose();
+  }
 
   bool isLoading = true;
   bool hasError = false;
@@ -65,9 +97,12 @@ class DashboardProvider with ChangeNotifier {
   List<Bill> allBills = [];
   List<InventoryItem> allInventory = [];
 
-  DashboardProvider() {
-    _loadData();
-  }
+  double salesChange = 0.0;
+  double purchaseChange = 0.0;
+  double expenseChange = 0.0;
+  double profitChange = 0.0;
+  double inventoryChange = 0.0;
+  double peopleChange = 0.0;
 
   Future<void> _loadData() async {
     try {
@@ -96,13 +131,61 @@ class DashboardProvider with ChangeNotifier {
       customerCount = people.where((p) => p.category == 'customer').length;
       productCount = inventory.length;
 
+      // Calculate percent changes (daily, capped at ±100%)
+      final now = DateTime.now();
+      double todaySales = 0, yesterdaySales = 0;
+      double todayPurchase = 0, yesterdayPurchase = 0;
+      double todayExpense = 0, yesterdayExpense = 0;
+      double todayProfit = 0, yesterdayProfit = 0;
+      int todayInventory = 0, yesterdayInventory = 0;
+      int todayPeople = 0, yesterdayPeople = 0;
+      for (final bill in bills) {
+        if (_isSameDay(bill.date, now)) {
+          todaySales += bill.total ?? 0;
+        } else if (_isSameDay(bill.date, now.subtract(const Duration(days: 1)))) {
+          yesterdaySales += bill.total ?? 0;
+        }
+      }
+      for (final item in inventory) {
+        if (_isSameDay(item.createdAt ?? now, now)) {
+          todayPurchase += item.price * item.quantity;
+          todayInventory++;
+        } else if (_isSameDay(item.createdAt ?? now, now.subtract(const Duration(days: 1)))) {
+          yesterdayPurchase += item.price * item.quantity;
+          yesterdayInventory++;
+        }
+      }
+      for (final exp in expenses) {
+        if (_isSameDay(exp.date, now)) {
+          todayExpense += exp.amount;
+        } else if (_isSameDay(exp.date, now.subtract(const Duration(days: 1)))) {
+          yesterdayExpense += exp.amount;
+        }
+      }
+      for (final p in people) {
+        if (_isSameDay(p.lastTransactionDate, now)) {
+          todayPeople++;
+        } else if (_isSameDay(p.lastTransactionDate, now.subtract(const Duration(days: 1)))) {
+          yesterdayPeople++;
+        }
+      }
+      todayProfit = todaySales - todayExpense;
+      yesterdayProfit = yesterdaySales - yesterdayExpense;
+      salesChange = _calcPercentChange(todaySales, yesterdaySales);
+      purchaseChange = _calcPercentChange(todayPurchase, yesterdayPurchase);
+      expenseChange = _calcPercentChange(todayExpense, yesterdayExpense);
+      profitChange = _calcPercentChange(todayProfit, yesterdayProfit);
+      inventoryChange = _calcPercentChange(todayInventory.toDouble(), yesterdayInventory.toDouble());
+      peopleChange = _calcPercentChange(todayPeople.toDouble(), yesterdayPeople.toDouble());
+      notifyListeners();
+
       // Chart data (last 7 days)
       salesChartData = [];
       purchaseChartData = [];
       comparisonChartLabels = [];
-      final now = DateTime.now();
+      final nowChart = DateTime.now();
       for (int i = 6; i >= 0; i--) {
-        final date = now.subtract(Duration(days: i));
+        final date = nowChart.subtract(Duration(days: i));
         final daySales = bills
             .where((bill) => _isSameDay(bill.date, date))
             .fold(0.0, (sum, bill) => sum + (bill.total ?? 0));
@@ -141,6 +224,16 @@ class DashboardProvider with ChangeNotifier {
     }
   }
 
+  // Helper to calculate capped percent change
+  double _calcPercentChange(double today, double yesterday) {
+    if (yesterday == 0 && today > 0) return 100.0;
+    if (yesterday == 0 && today == 0) return 0.0;
+    double percent = ((today - yesterday) / (yesterday == 0 ? 1 : yesterday)) * 100;
+    if (percent > 100) percent = 100;
+    if (percent < -100) percent = -100;
+    return percent;
+  }
+
   bool _isSameDay(DateTime date1, DateTime date2) {
     return date1.year == date2.year &&
         date1.month == date2.month &&
@@ -159,7 +252,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   // Repositories for real-time data
   final BillRepository _billRepo = BillRepository();
   final PeopleRepository _peopleRepo = PeopleRepository();
@@ -286,10 +379,52 @@ class _HomeScreenState extends State<HomeScreen> {
     super.didChangeDependencies();
     // Optionally refresh people when dependencies change (e.g., after navigation)
     _fetchAllPeople();
+    // Register for route changes
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  bool _showSearchBar = false;
+  final TextEditingController _searchBarController = TextEditingController();
+  List<Map<String, dynamic>> _searchResults = [];
+
+  final List<Map<String, dynamic>> _menuScreens = [
+    {'label': 'Inventory', 'icon': Icons.inventory_2, 'route': '/inventory'},
+    {'label': 'Sales', 'icon': Icons.point_of_sale, 'route': '/sales'},
+    {'label': 'Purchase', 'icon': Icons.shopping_cart, 'route': '/purchase'},
+    {'label': 'Expense', 'icon': Icons.money_off, 'route': '/expense'},
+    {'label': 'Reports', 'icon': Icons.bar_chart, 'route': '/reports'},
+    {'label': 'Calculator', 'icon': Icons.calculate, 'route': '/calculator'},
+    {'label': 'People', 'icon': Icons.people, 'route': '/peoples'},
+    {'label': 'Settings', 'icon': Icons.settings, 'route': '/settings'},
+  ];
+
+  void _onSearchChanged(String query) {
+    setState(() {
+      _searchResults = _menuScreens
+          .where((item) => item['label'].toLowerCase().contains(query.toLowerCase()))
+          .toList();
+    });
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    _searchBarController.dispose();
+    super.dispose();
+  }
+
+  // Called when coming back to HomeScreen
+  @override
+  void didPopNext() {
+    // Reload dashboard data
+    Provider.of<DashboardProvider>(context, listen: false).refreshData();
+    _fetchAllPeople();
+    super.didPopNext();
   }
 
   Future<void> _fetchAllPeople() async {
     final people = await _peopleRepo.getAllPeople();
+    if (!mounted) return;
     setState(() {
       _allPeople = people;
     });
@@ -308,37 +443,53 @@ class _HomeScreenState extends State<HomeScreen> {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
-    final userName = "Ehtisham"; // Replace with real user name if available
+    final user = FirebaseAuth.instance.currentUser;
+    final userName = user?.displayName ?? (user?.email?.split('@').first ?? '');
+    final userEmail = user?.email ?? '';
+    final userPhoto = user?.photoURL;
     final notificationCount = 3; // Replace with real notification count
 
-    return ChangeNotifierProvider(
-      create: (_) => DashboardProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<BillRepository>(create: (_) => BillRepository()),
+        ChangeNotifierProvider<InventoryRepository>(create: (_) => InventoryRepository()),
+        ChangeNotifierProvider<PeopleRepository>(create: (_) => PeopleRepository()),
+        ChangeNotifierProvider<ExpenseRepository>(create: (_) => ExpenseRepository()),
+        ChangeNotifierProvider<DashboardProvider>(
+          create: (context) => DashboardProvider(
+            billRepo: Provider.of<BillRepository>(context, listen: false),
+            inventoryRepo: Provider.of<InventoryRepository>(context, listen: false),
+            peopleRepo: Provider.of<PeopleRepository>(context, listen: false),
+            expenseRepo: Provider.of<ExpenseRepository>(context, listen: false),
+          ),
+        ),
+      ],
       child: Consumer<DashboardProvider>(
         builder: (context, provider, _) {
           if (provider.isLoading) {
-            return const Scaffold(
-              backgroundColor: Colors.white,
-              body: Center(child: CircularProgressIndicator()),
+            return Scaffold(
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              body: const Center(child: CircularProgressIndicator()),
             );
           }
           if (provider.hasError) {
             return Scaffold(
-              backgroundColor: Colors.white,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               body: Center(
                 child: Text(
                   'Error: ',
-                  style: TextStyle(color: Color(0xFF0A2342)),
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
             );
           }
           return Scaffold(
-            backgroundColor: Colors.white,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             extendBody: true,
             appBar: PreferredSize(
               preferredSize: const Size.fromHeight(70),
               child: AppBar(
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
                 elevation: 0,
                 centerTitle: false,
                 title: Row(
@@ -350,21 +501,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         shape: BoxShape.circle,
                         gradient: blueGradient,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.dashboard,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onPrimary,
                         size: 28,
                       ),
                     ),
                     const SizedBox(width: 14),
                     Text(
                       "Dashboard",
-                      style: GoogleFonts.poppins(
-                        color: darkBlue,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 22,
-                        letterSpacing: 0.5,
-                      ),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22),
                     ),
                   ],
                 ),
@@ -401,7 +547,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                     ],
                   ),
-                  const SizedBox(width: 8),
                 ],
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.vertical(
@@ -472,24 +617,50 @@ class _HomeScreenState extends State<HomeScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.search_rounded,
-                                      color: Color(0xFF1976D2),
-                                      size: 24,
-                                    ),
-                                    onPressed: () {
-                                      // Search action (implement if needed)
-                                    },
+                                  // Account icon with dropdown
+                                  PopupMenuButton<int>(
+                                    icon: userPhoto != null
+                                        ? CircleAvatar(
+                                            backgroundImage: NetworkImage(userPhoto!),
+                                            radius: 16,
+                                          )
+                                        : const Icon(Icons.account_circle_rounded, color: Color(0xFF1976D2), size: 28),
+                                    itemBuilder: (context) => [
+                                      PopupMenuItem(
+                                        enabled: false,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            if (userPhoto != null)
+                                              CircleAvatar(
+                                                backgroundImage: NetworkImage(userPhoto!),
+                                                radius: 24,
+                                              ),
+                                            if (userPhoto != null) const SizedBox(height: 8),
+                                            Text(userName, style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                                            Text(userEmail, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[700])),
+                                          ],
                                   ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.account_circle_rounded,
-                                      color: Color(0xFF1976D2),
-                                      size: 28,
+                                      ),
+                                      const PopupMenuDivider(),
+                                      PopupMenuItem(
+                                        value: 1,
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.logout, color: Color(0xFF1976D2), size: 20),
+                                            const SizedBox(width: 8),
+                                            Text('Logout', style: GoogleFonts.poppins(color: Color(0xFF1976D2))),
+                                          ],
                                     ),
-                                    onPressed: () {
-                                      // Account action
+                                      ),
+                                    ],
+                                    onSelected: (value) async {
+                                      if (value == 1) {
+                                        await FirebaseAuth.instance.signOut();
+                                        if (mounted) {
+                                          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+                                        }
+                                      }
                                     },
                                   ),
                                 ],
@@ -554,11 +725,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ],
                               ),
-                              Text(
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.pushNamed(context, '/reports');
+                                },
+                                child: Text(
                                 "See details",
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
+                                    decoration: TextDecoration.underline,
+                                  ),
                                 ),
                               ),
                             ],
@@ -575,93 +752,87 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisSpacing: 12,
                           childAspectRatio: 2.2,
                           children: [
-                            // Row 1: Sales, Purchase
+                            // Sales
                             GestureDetector(
                               onTap: () {
                                 Navigator.pushNamed(
                                   context,
                                   '/reports',
-                                  arguments: {
-                                    'selectedDetailedReport': 'sales',
-                                  },
+                                  arguments: {'selectedDetailedReport': 'sales'},
                                 );
                               },
                               child: _statCard(
                                 Icons.shopping_cart_rounded,
                                 "Sales",
                                 provider.totalSales,
-                                0.0,
+                                provider.salesChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
                                 iconColor: Color(0xFF1976D2),
                               ),
                             ),
+                            // Purchase
                             GestureDetector(
                               onTap: () {
                                 Navigator.pushNamed(
                                   context,
                                   '/reports',
-                                  arguments: {
-                                    'selectedDetailedReport': 'purchase',
-                                  },
+                                  arguments: {'selectedDetailedReport': 'purchase'},
                                 );
                               },
                               child: _statCard(
                                 Icons.inventory_2,
                                 "Purchase",
                                 provider.totalPurchase,
-                                0.0,
+                                provider.purchaseChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
                                 iconColor: Color(0xFF128C7E),
                               ),
                             ),
-                            // Row 2: People, Expense
+                            // People
                             GestureDetector(
                               onTap: () {
                                 Navigator.pushNamed(
                                   context,
                                   '/reports',
-                                  arguments: {
-                                    'selectedDetailedReport': 'people',
-                                  },
+                                  arguments: {'selectedDetailedReport': 'people'},
                                 );
                               },
                               child: _statCard(
                                 Icons.people_rounded,
                                 "People",
                                 provider.customerCount,
-                                0.0,
+                                provider.peopleChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
                                 iconColor: Colors.blue,
                               ),
                             ),
+                            // Expense
                             GestureDetector(
                               onTap: () {
                                 Navigator.pushNamed(
                                   context,
                                   '/reports',
-                                  arguments: {
-                                    'selectedDetailedReport': 'expense',
-                                  },
+                                  arguments: {'selectedDetailedReport': 'expense'},
                                 );
                               },
                               child: _statCard(
                                 Icons.money_off,
                                 "Expense",
                                 provider.totalExpense,
-                                0.0,
+                                provider.expenseChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
                                 iconColor: Colors.red,
                               ),
                             ),
-                            // Row 3: Profit
+                            // Profit
                             GestureDetector(
                               onTap: () {
                                 Navigator.pushNamed(context, '/reports');
@@ -670,29 +841,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Icons.trending_up_rounded,
                                 "Profit",
                                 provider.totalSales - provider.totalExpense,
-                                0.0,
+                                provider.profitChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
                                 iconColor: Color(0xFF10B981),
                               ),
                             ),
-                            // Row 4: Inventory
+                            // Inventory
                             GestureDetector(
                               onTap: () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/reports',
-                                  arguments: {
-                                    'selectedDetailedReport': 'purchase',
-                                  },
-                                );
+                                Navigator.pushNamed(context, '/inventory');
                               },
                               child: _statCard(
                                 Icons.store_rounded,
                                 "Inventory",
                                 provider.allInventory.length,
-                                0.0,
+                                provider.inventoryChange,
                                 Colors.white,
                                 gradient: null,
                                 textColor: Colors.black,
@@ -706,7 +871,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         // Reduce spacing between recent people avatars and menu grid
                         Container(
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Theme.of(context).cardColor,
                             borderRadius: BorderRadius.circular(18),
                             boxShadow: [
                               BoxShadow(
@@ -797,17 +962,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        FutureBuilder<List<Activity>>(
-                          future: ActivityRepository().getRecentActivities(
-                            limit: 30,
-                          ),
+                        StreamBuilder<List<Activity>>(
+                          stream: ActivityRepository().getRecentActivitiesStream(limit: 30),
                           builder: (context, snapshot) {
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                child: CircularProgressIndicator(),
-                              );
-                            }
                             if (!snapshot.hasData || snapshot.data!.isEmpty) {
                               return Center(
                                 child: Text(
@@ -876,7 +1033,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     border: Border(
                                       left: BorderSide(color: color, width: 4),
                                     ),
-                                    color: Colors.white,
+                                    color: Theme.of(context).cardColor,
                                   ),
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
@@ -1071,6 +1228,10 @@ class _HomeScreenState extends State<HomeScreen> {
     Color textColor = Colors.black,
     Color iconColor = Colors.blue,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF232A36) : color;
+    final effectiveTextColor = isDark ? Colors.white : textColor;
+    final effectiveIconColor = isDark ? Colors.white : iconColor;
     final isUp = change >= 0;
     return Container(
       constraints: const BoxConstraints(
@@ -1080,7 +1241,7 @@ class _HomeScreenState extends State<HomeScreen> {
         maxHeight: 70,
       ),
       decoration: BoxDecoration(
-        color: color,
+        color: cardColor,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
@@ -1094,8 +1255,8 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: iconColor.withOpacity(0.13),
-            child: Icon(icon, color: iconColor, size: 20),
+            backgroundColor: effectiveIconColor.withOpacity(0.13),
+            child: Icon(icon, color: effectiveIconColor, size: 20),
             radius: 18,
           ),
           const SizedBox(width: 8),
@@ -1108,7 +1269,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   label,
                   style: GoogleFonts.poppins(
                     fontSize: 13,
-                    color: textColor.withOpacity(0.7),
+                    color: effectiveTextColor.withOpacity(0.7),
                     fontWeight: FontWeight.w500,
                   ),
                   maxLines: 1,
@@ -1119,7 +1280,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
-                    color: textColor,
+                    color: effectiveTextColor,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1172,7 +1333,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -1181,7 +1342,7 @@ class _HomeScreenState extends State<HomeScreen> {
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: const Color(0xFFE3F2FD), width: 1.2),
+        border: Border.all(color: Theme.of(context).dividerColor, width: 1.2),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1443,7 +1604,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Container(
             height: 124, // Increased height
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(18),
               boxShadow: [
                 BoxShadow(
@@ -1452,7 +1613,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   offset: const Offset(0, 2),
                 ),
               ],
-              border: Border.all(color: Colors.grey[200]!),
             ),
             padding: const EdgeInsets.symmetric(
               vertical: 10,
@@ -1500,7 +1660,7 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const CircularNotchedRectangle(),
       notchMargin: 8,
       elevation: 0,
-      color: Colors.white,
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: SizedBox(
         height: 60,
         child: Row(
@@ -1683,7 +1843,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isSelected = _graphFilter == value;
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? const Color(0xFF1976D2) : Colors.white,
+        backgroundColor: isSelected ? const Color(0xFF1976D2) : Theme.of(context).cardColor,
         foregroundColor: isSelected ? Colors.white : const Color(0xFF1976D2),
         elevation: isSelected ? 2 : 0,
         shape: RoundedRectangleBorder(
@@ -1732,6 +1892,12 @@ IconData getActivityIcon(String type, Map<String, dynamic>? metadata) {
     case 'expense_edit':
       return Icons.edit_document;
     case 'expense_delete':
+      return Icons.delete_outline_rounded;
+    case 'inventory_add':
+      return Icons.add_box_rounded;
+    case 'inventory_edit':
+      return Icons.edit_rounded;
+    case 'inventory_delete':
       return Icons.delete_outline_rounded;
     default:
       return Icons.info_outline_rounded;
@@ -1794,6 +1960,12 @@ String _getActivityTypeLabel(String type) {
       return 'Expense Edited';
     case 'expense_delete':
       return 'Expense Deleted';
+    case 'inventory_add':
+      return 'Inventory Added';
+    case 'inventory_edit':
+      return 'Inventory Edited';
+    case 'inventory_delete':
+      return 'Inventory Deleted';
     default:
       return 'Activity';
   }
@@ -1805,6 +1977,8 @@ Color _getActivityTextColor(String type) {
     return const Color(0xFF1976D2); // blue for sales
   } else if (type.startsWith('purchase')) {
     return const Color(0xFF388E3C); // green for purchase
+  } else if (type.startsWith('inventory')) {
+    return const Color(0xFF1976D2); // blue for inventory
   } else if (type.endsWith('_delete')) {
     return const Color(0xFFD32F2F); // red for deletes
   } else {

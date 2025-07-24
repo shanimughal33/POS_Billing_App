@@ -1,7 +1,8 @@
 import '../models/expense.dart';
 import '../database/database_helper.dart';
+import 'package:flutter/foundation.dart';
 
-class ExpenseRepository {
+class ExpenseRepository extends ChangeNotifier {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
   Future<int> insertExpense(Expense expense) async {

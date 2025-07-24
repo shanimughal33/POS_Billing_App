@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:lottie/lottie.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({Key? key}) : super(key: key);
@@ -50,98 +51,112 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.white, // White background
       appBar: AppBar(
-        title: const Text('Reset Password'),
+        title: Text('Reset Password', style: TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: IconThemeData(color: Colors.blue[800]),
-        titleTextStyle: TextStyle(
-          color: Colors.blue[800],
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-        ),
+        iconTheme: IconThemeData(color: Color(0xFF1976D2)),
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           child: Form(
             key: _formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Lottie animation at the top
+                SizedBox(
+                  height: 160,
+                  child: Lottie.asset(
+                    'assets/Authentication Lock Login.json',
+                    fit: BoxFit.contain,
+                    repeat: true,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Text(
                   'Forgot Your Password?',
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.blue[800],
+                    color: Color(0xFF1976D2),
                   ),
-                ).animate().fade(duration: 500.ms).slideY(begin: -0.5),
-                const SizedBox(height: 16),
+                ),
+                const SizedBox(height: 4),
                 Text(
-                  'Enter your email below to receive a password reset link.',
+                  'Enter your email to receive a reset link.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                ).animate().fade(delay: 200.ms),
-                const SizedBox(height: 48),
+                  style: TextStyle(fontSize: 14, color: Colors.black54),
+                ),
+                const SizedBox(height: 18),
                 TextFormField(
                   controller: _emailController,
                   decoration: InputDecoration(
                     labelText: 'Email',
-                    prefixIcon: Icon(Icons.email, color: Colors.blue[800]),
+                    prefixIcon: Icon(Icons.email, color: Color(0xFF1976D2)),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                    ),
+                    fillColor: Colors.grey[50],
+                    filled: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                   ),
                   keyboardType: TextInputType.emailAddress,
+                  style: TextStyle(fontSize: 14),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your email';
                     }
-                    if (!RegExp(
-                      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                    ).hasMatch(value)) {
+                    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
                       return 'Please enter a valid email';
                     }
                     return null;
                   },
-                ).animate().fade(delay: 400.ms).slideX(begin: -0.5),
-                const SizedBox(height: 32),
+                ),
+                const SizedBox(height: 14),
                 _loading
-                    ? const CircularProgressIndicator()
-                    : ElevatedButton(
-                        onPressed: _sendResetLink,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[800],
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 60,
-                            vertical: 16,
+                    ? const CircularProgressIndicator(color: Color(0xFF1976D2))
+                    : SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _sendResetLink,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Color(0xFF1976D2),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          child: Text('Send Reset Link', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                         ),
-                        child: const Text('Send Reset Link'),
-                      ).animate().fade(delay: 600.ms).scale(),
+                      ),
                 if (_info != null) ...[
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 10),
                   Text(
                     _info!,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: _info!.startsWith('Error')
-                          ? Colors.red
-                          : Colors.green,
-                      fontSize: 16,
+                      color: _info!.startsWith('Error') ? Colors.red : Colors.green,
+                      fontSize: 13,
                     ),
-                  ).animate().fade(),
+                  ),
                 ],
               ],
-            ).animate().slideY(begin: 0.5, duration: 500.ms),
+            ),
           ),
         ),
       ),
     );
   }
 }
+ 

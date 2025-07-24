@@ -26,6 +26,11 @@ import 'widgets/export_buttons.dart';
 import 'widgets/theme_toggle.dart';
 import 'widgets/date_range_picker.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:syncfusion_flutter_xlsio/xlsio.dart' as xlsio;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 const Color accentGreen = Color(0xFF128C7E); // WhatsApp green
 
@@ -640,7 +645,20 @@ class _ReportScreenState extends State<ReportScreen> {
   @override
   void initState() {
     super.initState();
+    // Use widget.selectedDetailedReport if provided
     selectedDetailedReport = widget.selectedDetailedReport;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // If navigated with arguments, use them
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map && args['selectedDetailedReport'] is String) {
+      setState(() {
+        selectedDetailedReport = args['selectedDetailedReport'];
+      });
+    }
   }
 
   void _showDetailedReport(String type) {
@@ -1088,7 +1106,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 color: isDark ? Colors.white : Colors.black87,
               ),
             ),
-            // Removed View All button
+            // Remove all PopupMenuButton, export icons, and export logic from the report screen UI.
           ],
         ),
         const SizedBox(height: 16),
@@ -1270,5 +1288,81 @@ String formatIndianAmount(num amount) {
   } else {
     final formatter = NumberFormat('#,##,##0.##');
     return formatter.format(amount);
+  }
+}
+
+Future<void> _exportToExcel(BuildContext context) async {
+  try {
+    final provider = Provider.of<ReportProvider>(context, listen: false);
+    final tableData = provider.tableData;
+    final workbook = xlsio.Workbook();
+    final sheet = workbook.worksheets[0];
+    if (tableData.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No data to export.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    // Add headers
+    final headers = tableData.first.keys.toList();
+    for (int i = 0; i < headers.length; i++) {
+      sheet.getRangeByIndex(1, i + 1).setText(headers[i]);
+    }
+    // Add data
+    for (int row = 0; row < tableData.length; row++) {
+      final dataRow = tableData[row];
+      for (int col = 0; col < headers.length; col++) {
+        sheet.getRangeByIndex(row + 2, col + 1).setText('${dataRow[headers[col]] ?? ''}');
+      }
+    }
+    final bytes = workbook.saveAsStream();
+    workbook.dispose();
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/report.xlsx');
+    await file.writeAsBytes(bytes, flush: true);
+    if (!await file.exists() || await file.length() == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to create Excel file.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    await Share.shareXFiles([XFile(file.path)], text: 'Exported Report (Excel)');
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
+    );
+  }
+}
+
+Future<void> _exportToWord(BuildContext context) async {
+  try {
+    final provider = Provider.of<ReportProvider>(context, listen: false);
+    final tableData = provider.tableData;
+    if (tableData.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No data to export.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    final headers = tableData.first.keys.toList();
+    final buffer = StringBuffer();
+    buffer.writeln(headers.join('\t'));
+    for (final row in tableData) {
+      buffer.writeln(headers.map((h) => row[h]).join('\t'));
+    }
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/report.doc');
+    await file.writeAsString(buffer.toString());
+    if (!await file.exists() || await file.length() == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to create Word file.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    await Share.shareXFiles([XFile(file.path)], text: 'Exported Report (Word)');
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
+    );
   }
 }

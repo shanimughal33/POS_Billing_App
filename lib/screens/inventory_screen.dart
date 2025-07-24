@@ -4,13 +4,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/inventory_cubit.dart';
 import '../utils/app_theme.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../models/activity.dart';
+import '../repositories/activity_repository.dart';
 
 class InventoryScreen extends StatelessWidget {
   const InventoryScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return const InventoryView();
+    return InventoryView();
   }
 }
 
@@ -30,7 +32,10 @@ class _InventoryViewState extends State<InventoryView> {
   @override
   void initState() {
     super.initState();
-    // Removed refreshInventory microtask to avoid unnecessary DB reloads
+    // Always load inventory when this screen is opened
+    Future.microtask(() {
+      context.read<InventoryCubit>().loadInventory();
+    });
   }
 
   @override
@@ -372,7 +377,7 @@ class _InventoryViewState extends State<InventoryView> {
     );
   }
 
-  void _showItemDialog(BuildContext context, {InventoryItem? item}) {
+  void _showItemDialog(BuildContext context, {InventoryItem? item}) async {
     final nameController = TextEditingController(text: item?.name);
     final priceController = TextEditingController(text: item?.price.toString());
     final quantityController = TextEditingController(
@@ -386,8 +391,8 @@ class _InventoryViewState extends State<InventoryView> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(16),
             topRight: Radius.circular(16),
@@ -408,10 +413,10 @@ class _InventoryViewState extends State<InventoryView> {
               children: [
                 Text(
                   item == null ? 'Add New Item' : 'Edit Item',
-                  style: const TextStyle(
-                    fontSize: 20,
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
                     fontWeight: FontWeight.bold,
-                    color: kBlue,
+                    fontSize: 20,
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -421,45 +426,58 @@ class _InventoryViewState extends State<InventoryView> {
                     labelText: 'Item Name',
                     hintText: 'Enter item name',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 1),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return 'Please enter item name';
+                    }
+                    final pattern = RegExp(r'^[a-zA-Z0-9\-\s]{2,50}$');
+                    if (!pattern.hasMatch(value.trim())) {
+                      return '2-50 letters, numbers, spaces, or dashes only';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: priceController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                     labelText: 'Price (₨)',
                     hintText: 'Enter price',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 1),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 1),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
@@ -468,43 +486,51 @@ class _InventoryViewState extends State<InventoryView> {
                     }
                     final price = double.tryParse(value);
                     if (price == null || price <= 0) {
-                      return 'Please enter a valid price';
+                      return 'Please enter a valid price (>0)';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: quantityController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
                   decoration: InputDecoration(
                     labelText: 'Quantity',
                     hintText: 'Enter quantity',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 1),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter quantity';
                     }
-                    final quantity = double.tryParse(value);
-                    if (quantity == null || quantity < 0) {
-                      return 'Please enter a valid quantity';
+                    final quantity = int.tryParse(value);
+                    if (quantity == null || quantity <= 0) {
+                      return 'Please enter a valid quantity (>0, integer)';
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -513,16 +539,20 @@ class _InventoryViewState extends State<InventoryView> {
                     labelText: 'Shortcut (Optional)',
                     hintText: 'Enter shortcut code',
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 0),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: kBlue, width: 1),
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: kBlue, width: 2),
                     ),
                   ),
                   validator: (value) {
@@ -560,6 +590,9 @@ class _InventoryViewState extends State<InventoryView> {
                     }
                     return null;
                   },
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 Row(
@@ -567,21 +600,21 @@ class _InventoryViewState extends State<InventoryView> {
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel'),
+                      child: Text('Cancel', style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2))),
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Color(0xFF1976D2),
+                        backgroundColor: Color(0xFF1976D2),
+                        foregroundColor: Colors.white,
                         textStyle: const TextStyle(fontWeight: FontWeight.bold),
                         side: BorderSide.none,
                       ),
                       child: Text(
                         'Save',
-                        style: TextStyle(color: Color(0xFF1976D2)),
+                        style: TextStyle(color: Colors.white),
                       ),
-                      onPressed: () {
+                      onPressed: () async {
                         if (formKey.currentState!.validate()) {
                           final newItem = InventoryItem(
                             id: item?.id,
@@ -597,6 +630,7 @@ class _InventoryViewState extends State<InventoryView> {
                             newItem,
                           );
                           Navigator.pop(context);
+                          await _logInventoryActivity(item, newItem);
                         }
                       },
                     ),
@@ -632,6 +666,8 @@ class _InventoryViewState extends State<InventoryView> {
 
     if (confirmed == true) {
       context.read<InventoryCubit>().deleteInventoryItem(id);
+      Navigator.pop(context);
+      await _logDeleteInventoryActivity(id);
     }
   }
 
@@ -702,21 +738,22 @@ class _InventoryViewState extends State<InventoryView> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: kWhite,
+      backgroundColor: isDark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF1A2233) : Colors.white,
         centerTitle: true,
         title: Text(
           'Inventory',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
-            color: Color(0xFF0A2342),
+            color: isDark ? Colors.white : Color(0xFF0A2342),
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
           ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : Color(0xFF0A2342)),
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -789,4 +826,32 @@ class _InventoryViewState extends State<InventoryView> {
       ),
     );
   }
+}
+
+Future<void> _logInventoryActivity(InventoryItem? oldItem, InventoryItem newItem) async {
+  await ActivityRepository().logActivity(
+    Activity(
+      type: oldItem == null ? 'inventory_add' : 'inventory_edit',
+      description: (oldItem == null ? 'Added' : 'Edited') + ' inventory item: ' + newItem.name,
+      timestamp: DateTime.now(),
+      metadata: {
+        'id': newItem.id,
+        'name': newItem.name,
+        'price': newItem.price,
+        'quantity': newItem.quantity,
+        'shortcut': newItem.shortcut,
+      },
+    ),
+  );
+}
+
+Future<void> _logDeleteInventoryActivity(int id) async {
+  await ActivityRepository().logActivity(
+    Activity(
+      type: 'inventory_delete',
+      description: 'Deleted inventory item with id: $id',
+      timestamp: DateTime.now(),
+      metadata: {'id': id},
+    ),
+  );
 }

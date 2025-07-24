@@ -95,7 +95,7 @@ class _KpiCardState extends State<KpiCard> with SingleTickerProviderStateMixin {
               margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               decoration: BoxDecoration(
                 color: cardColor,
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(6), // Less rounded for a more square look
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.1),

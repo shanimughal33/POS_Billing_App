@@ -1,10 +1,11 @@
 // ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
 
+import 'package:flutter/foundation.dart';
 import '../database/database_helper.dart';
 import '../models/bill_item.dart';
 import '../models/bill.dart';
 
-class BillRepository {
+class BillRepository extends ChangeNotifier {
   final DatabaseHelper _databaseHelper = DatabaseHelper.instance;
 
   // Insert a Bill and its items in a transaction with proper foreign key relationship

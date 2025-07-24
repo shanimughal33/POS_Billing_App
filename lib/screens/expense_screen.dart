@@ -8,6 +8,7 @@ import 'package:dropdown_button2/dropdown_button2.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
 import '../utils/app_theme.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 class ExpenseScreen extends StatefulWidget {
   const ExpenseScreen({super.key});
@@ -343,8 +344,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           alignment: Alignment.bottomCenter,
           child: Container(
             margin: const EdgeInsets.only(top: 48),
-            decoration: const BoxDecoration(
-              color: kCardBg,
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.black : kCardBg,
               borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
               boxShadow: [
                 BoxShadow(
@@ -370,14 +371,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                     children: [
                       Text(
                         isEdit ? 'Edit Expense' : 'Add Expense',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: kBlue,
+                          color: Color(0xFF1976D2),
                         ),
                       ),
                       const SizedBox(height: 22),
                       _buildAttractiveTextField(
+                        context: context,
                         controller: nameController,
                         label: 'Expense Name',
                         icon: Icons.title,
@@ -385,11 +387,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           if (val == null || val.trim().isEmpty) {
                             return 'Expense name is required';
                           }
+                          if (val.trim().length < 2 || val.trim().length > 100) {
+                            return 'Expense name must be 2-100 characters.';
+                          }
                           return null;
                         },
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
+                        context: context,
                         controller: dateController,
                         label: 'Date',
                         icon: Icons.calendar_today,
@@ -420,6 +426,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveDropdown(
+                        context: context,
                         value: selectedCategory,
                         label: 'Category',
                         icon: Icons.category,
@@ -432,6 +439,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
+                        context: context,
                         controller: amountController,
                         label: 'Amount (Rs)',
                         icon: Icons.attach_money,
@@ -451,6 +459,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveDropdown(
+                        context: context,
                         value: selectedPaymentMethod,
                         label: 'Payment Method',
                         icon: Icons.payment,
@@ -463,10 +472,17 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
+                        context: context,
                         controller: descriptionController,
                         label: 'Notes',
                         icon: Icons.note,
                         maxLines: 2,
+                        validator: (val) {
+                          if (val != null && val.length > 100) {
+                            return 'Notes can be at most 100 characters.';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 28),
                       Row(
@@ -474,11 +490,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(context),
-                            child: const Text(
+                            child: Text(
                               'Cancel',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: kBlue,
+                                color: Color(0xFF1976D2),
                               ),
                             ),
                           ),
@@ -600,20 +616,19 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     return DefaultTabController(
       length: _categories.length + 1,
       child: Scaffold(
-        backgroundColor: kWhite,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
           centerTitle: true,
           title: Text(
             'Expenses',
-            style: const TextStyle(
-              fontSize: 22,
-              color: Color(0xFF0A2342),
+            style: TextStyle(
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,
               fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
+              fontSize: 22,
             ),
           ),
-          iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+          iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color),
           elevation: 0,
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -713,7 +728,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           children: [
                             Icon(
                               Icons.money_off_csred_rounded,
-                              color: kWhite,
+                              color: Colors.white,
                               size: 24,
                             ),
                             const SizedBox(width: 12),
@@ -721,7 +736,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               child: Text(
                                 totalLabel,
                                 style: const TextStyle(
-                                  color: kWhite,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 18,
                                   letterSpacing: 0.5,
@@ -746,7 +761,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                         child: Text(
                           'Rs ${_getTotalExpense(category).toStringAsFixed(2)}',
                           style: const TextStyle(
-                            color: kWhite,
+                            color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
                             letterSpacing: 0.5,
@@ -857,6 +872,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                   constraints: const BoxConstraints(
                                     minHeight: 80,
                                   ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).brightness == Brightness.dark ? Color(0xFF232A36) : Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                   child: Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -932,7 +951,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                                       decoration: BoxDecoration(
                                                         color:
                                                             _getCategoryColor(
-                                                              expense.category,
+                                                              expense
+                                                                  .category,
                                                             ).withAlpha(
                                                               (0.1 * 255)
                                                                   .toInt(),
@@ -1190,6 +1210,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 }
 
 Widget _buildAttractiveTextField({
+  required BuildContext context,
   required TextEditingController controller,
   required String label,
   required IconData icon,
@@ -1211,7 +1232,7 @@ Widget _buildAttractiveTextField({
       readOnly: readOnly,
       maxLines: maxLines,
       onTap: onTap,
-      style: const TextStyle(fontSize: 14),
+      style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: const TextStyle(color: kBlue, fontSize: 14),
@@ -1232,7 +1253,7 @@ Widget _buildAttractiveTextField({
           borderSide: const BorderSide(color: kBlue),
         ),
         filled: true,
-        fillColor: kWhite,
+        fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.black : kWhite,
         contentPadding: const EdgeInsets.symmetric(
           vertical: 10,
           horizontal: 10,
@@ -1243,6 +1264,7 @@ Widget _buildAttractiveTextField({
 }
 
 Widget _buildAttractiveDropdown({
+  required BuildContext context,
   required String value,
   required String label,
   required IconData icon,

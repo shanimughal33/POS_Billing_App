@@ -8,6 +8,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart'; // for kIsWeb
 import 'package:firebase_auth/firebase_auth.dart';
 
+// Add a ValueNotifier for theme mode at the top of the file (or use Provider for a more robust solution)
+ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -21,15 +24,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsEnabled = true;
   String _businessName = '';
   String _businessAddress = '';
-  String _businessPhone = '';
+  String _businessPhone = 'N/A';
   String _businessEmail = '';
   String _currency = 'Rs';
   String _taxRate = '0';
   final String _appVersion = '1.0.0';
   final String _buildNumber = '1';
-  String _supportPhone = '';
+  String _supportPhone = 'N/A';
   String _businessLogoPath = '';
-  String _customFooter = '';
+  String _customFooter = 'Thank you for your business!';
   bool _enableDiscounts = true;
   double _defaultDiscount = 0.0;
 
@@ -46,13 +49,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _notificationsEnabled = prefs.getBool('notificationsEnabled') ?? true;
       _businessName = prefs.getString('businessName') ?? '';
       _businessAddress = prefs.getString('businessAddress') ?? '';
-      _businessPhone = prefs.getString('businessPhone') ?? '';
+      _businessPhone = prefs.getString('businessPhone') ?? 'N/A';
       _businessEmail = prefs.getString('businessEmail') ?? '';
       _currency = prefs.getString('currency') ?? 'Rs';
       _taxRate = prefs.getString('taxRate') ?? '0';
       _supportPhone = prefs.getString('supportPhone') ?? _businessPhone;
       _businessLogoPath = prefs.getString('businessLogoPath') ?? '';
-      _customFooter = prefs.getString('customFooter') ?? '';
+      _customFooter = prefs.getString('customFooter') ?? 'Thank you for your business!';
       _enableDiscounts = prefs.getBool('enableDiscounts') ?? true;
       _defaultDiscount = prefs.getDouble('defaultDiscount') ?? 0.0;
     });
@@ -80,20 +83,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? const Color(0xFF0F0F0F) : Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? const Color(0xFF1A2233) : Colors.white,
         centerTitle: true,
         title: Text(
           'Settings',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
-            color: Color(0xFF0A2342),
+            color: isDark ? Colors.white : Color(0xFF1976D2),
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
           ),
         ),
-        iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : Color(0xFF0A2342)),
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -104,45 +107,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionTitle('Business Information'),
+            _buildSectionTitle('Business Information', isDark),
             const SizedBox(height: 16),
-            _buildBusinessInfoSection(),
+            _buildBusinessInfoSection(isDark),
 
             const SizedBox(height: 32),
-            _buildSectionTitle('App Settings'),
+            _buildSectionTitle('App Settings', isDark),
             const SizedBox(height: 16),
-            _buildAppSettingsSection(),
+            _buildAppSettingsSection(isDark),
 
             const SizedBox(height: 32),
-            _buildSectionTitle('Data Management'),
+            _buildSectionTitle('Data Management', isDark),
             const SizedBox(height: 16),
-            _buildDataManagementSection(),
+            _buildDataManagementSection(isDark),
 
             const SizedBox(height: 32),
-            _buildSectionTitle('Support & About'),
+            _buildSectionTitle('Support & About', isDark),
             const SizedBox(height: 16),
-            _buildSupportSection(),
+            _buildSupportSection(isDark),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
+  Widget _buildSectionTitle(String title, bool isDark) {
     return Text(
       title,
       style: GoogleFonts.poppins(
         fontSize: 18,
         fontWeight: FontWeight.w600,
-        color: accentBlue,
+        color: isDark ? Colors.white : Color(0xFF0A2342),
       ),
     );
   }
 
-  Widget _buildBusinessInfoSection() {
+  Widget _buildBusinessInfoSection(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1A2233) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -159,6 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Business Name',
             subtitle: _businessName.isEmpty ? 'Not set' : _businessName,
             onTap: () => _showBusinessNameDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -166,6 +170,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Business Address',
             subtitle: _businessAddress.isEmpty ? 'Not set' : _businessAddress,
             onTap: () => _showBusinessAddressDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -173,6 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Business Phone',
             subtitle: _businessPhone.isEmpty ? 'Not set' : _businessPhone,
             onTap: () => _showBusinessPhoneDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -180,6 +186,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Business Email',
             subtitle: _businessEmail.isEmpty ? 'Not set' : _businessEmail,
             onTap: () => _showBusinessEmailDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -187,6 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Currency',
             subtitle: _currency,
             onTap: () => _showCurrencyDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -194,6 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Tax Rate (%)',
             subtitle: '$_taxRate%',
             onTap: () => _showTaxRateDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -201,6 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'For Support (Phone)',
             subtitle: _supportPhone.isEmpty ? 'Not set' : _supportPhone,
             onTap: () => _showSupportPhoneDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           ListTile(
@@ -212,9 +222,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fit: BoxFit.cover,
                   )
                 : const Icon(Icons.image, size: 40),
-            title: const Text('Business Logo'),
+            title: Text(
+              'Business Logo',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
             subtitle: Text(
               _businessLogoPath.isEmpty ? 'No logo selected' : 'Logo selected',
+              style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12),
             ),
             trailing: IconButton(
               icon: const Icon(Icons.edit),
@@ -227,6 +244,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Custom Footer Message',
             subtitle: _customFooter.isEmpty ? 'Not set' : _customFooter,
             onTap: () => _showCustomFooterDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           SwitchListTile.adaptive(
@@ -239,10 +257,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Enable Discounts',
               style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w600,
-                color: accentBlue,
+                color: isDark ? Colors.white : Color(0xFF0A2342),
               ),
             ),
-            secondary: Icon(Icons.discount, color: accentBlue, size: 20),
+            secondary: Icon(Icons.discount, color: isDark ? Colors.white : Color(0xFF0A2342), size: 20),
             activeColor: accentBlue,
           ),
           if (_enableDiscounts)
@@ -250,13 +268,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Row(
                 children: [
-                  Icon(Icons.percent, color: accentBlue, size: 20),
+                  Icon(Icons.percent, color: isDark ? Colors.white : Color(0xFF0A2342), size: 20),
                   const SizedBox(width: 8),
                   Text(
                     'Default Discount (%)',
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
-                      color: accentBlue,
+                      color: isDark ? Colors.white : Color(0xFF0A2342),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -294,10 +312,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildAppSettingsSection() {
+  Widget _buildAppSettingsSection(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1A2233) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -309,40 +327,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Column(
         children: [
-          _buildSwitchTile(
-            icon: Icons.dark_mode_rounded,
-            title: 'Dark Mode',
-            subtitle: 'Toggle dark theme',
-            value: _isDarkMode,
-            onChanged: (value) {
-              setState(() {
-                _isDarkMode = value;
-              });
-              _saveSettings();
+          SwitchListTile.adaptive(
+            value: Theme.of(context).brightness == Brightness.dark,
+            onChanged: (val) {
+              themeModeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
+              // Optionally save to SharedPreferences for persistence
             },
-          ),
-          _buildDivider(),
-          _buildSwitchTile(
-            icon: Icons.notifications_rounded,
-            title: 'Notifications',
-            subtitle: 'Enable push notifications',
-            value: _notificationsEnabled,
-            onChanged: (value) {
-              setState(() {
-                _notificationsEnabled = value;
-              });
-              _saveSettings();
-            },
+            title: Text(
+              'Dark Mode',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Color(0xFF0A2342),
+              ),
+            ),
+            secondary: Icon(Icons.dark_mode, color: isDark ? Colors.white : Color(0xFF0A2342), size: 20),
+            activeColor: accentBlue,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDataManagementSection() {
+  Widget _buildDataManagementSection(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1A2233) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -359,6 +368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Sync Data',
             subtitle: 'Sync data with cloud',
             onTap: () => _showSyncDataDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -366,6 +376,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Backup Data',
             subtitle: 'Export your data',
             onTap: () => _showBackupDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -373,6 +384,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Restore Data',
             subtitle: 'Import your data',
             onTap: () => _showRestoreDialog(),
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -381,6 +393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Delete all data permanently',
             onTap: () => _showClearDataDialog(),
             isDestructive: true,
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
@@ -389,6 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Sign out of your account',
             onTap: () => _showLogoutDialog(),
             isDestructive: true,
+            isDark: isDark,
           ),
           _buildDivider(),
         ],
@@ -396,10 +410,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSupportSection() {
+  Widget _buildSupportSection(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1A2233) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -415,21 +429,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.help_rounded,
             title: 'Help & Support',
             subtitle: 'Get help and support',
-            onTap: () => _showHelpDialog(),
+            onTap: _showHelpDialog,
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
             icon: Icons.feedback_rounded,
             title: 'Send Feedback',
             subtitle: 'Share your feedback',
-            onTap: () => _showFeedbackDialog(),
+            onTap: _showFeedbackDialog,
+            isDark: isDark,
           ),
           _buildDivider(),
           _buildSettingTile(
             icon: Icons.info_rounded,
             title: 'About App',
             subtitle: 'Version $_appVersion ($_buildNumber)',
-            onTap: () => _showAboutDialog(),
+            onTap: _showAboutDialog,
+            isDark: isDark,
           ),
         ],
       ),
@@ -442,6 +459,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String subtitle,
     required VoidCallback onTap,
     bool isDestructive = false,
+    bool isDark = false,
   }) {
     return ListTile(
       leading: Container(
@@ -462,7 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title,
         style: GoogleFonts.poppins(
           fontWeight: FontWeight.w600,
-          color: isDestructive ? Colors.red : Colors.black87,
+          color: isDark ? Colors.white : Colors.black87,
         ),
       ),
       subtitle: Text(
@@ -484,6 +502,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool isDark = false,
   }) {
     return ListTile(
       leading: Container(
@@ -492,7 +511,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           color: accentBlue.withAlpha(25),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, color: accentBlue, size: 20),
+        child: Icon(icon, color: isDark ? Colors.white : accentBlue, size: 20),
       ),
       title: Text(
         title,
@@ -595,13 +614,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Currency'),
+        title: Text(
+          'Select Currency',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: currencies
               .map(
                 (currency) => ListTile(
-                  title: Text(currency),
+                  title: Text(currency, style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2))),
                   trailing: _currency == currency
                       ? Icon(Icons.check, color: accentBlue)
                       : null,
@@ -655,10 +677,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Custom Footer Message'),
+        title: Text(
+          'Custom Footer Message',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
         content: TextField(
           controller: controller,
           maxLines: 3,
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
           decoration: InputDecoration(
             hintText: 'Enter footer message...',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -667,7 +693,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -678,7 +707,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Save',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -688,7 +720,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _pickBusinessLogo() async {
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logo upload is not supported on web.')),
+        SnackBar(
+          content: Text(
+            'Logo upload is not supported on web.',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
+        ),
       );
       return;
     }
@@ -703,9 +740,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
             'Error picking image. Make sure image_picker is in your pubspec.yaml.',
+            style: GoogleFonts.poppins(color: Colors.white),
           ),
         ),
       );
@@ -723,11 +761,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(title),
+        title: Text(
+          title,
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
         content: TextField(
           controller: controller,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
           decoration: InputDecoration(
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           ),
@@ -735,7 +777,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -750,7 +795,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Save',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -761,14 +809,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sync Data'),
-        content: const Text(
+        title: Text(
+          'Sync Data',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
           'This will sync your data with the cloud. Continue?',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -776,7 +831,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _performSyncData();
             },
             style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Sync', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Sync',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -787,14 +845,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Backup Data'),
-        content: const Text(
+        title: Text(
+          'Backup Data',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
           'This will export all your data to a file. Continue?',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -802,7 +867,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _performBackup();
             },
             style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Backup', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Backup',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -813,14 +881,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Restore Data'),
-        content: const Text(
+        title: Text(
+          'Restore Data',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
           'This will import data from a backup file. Continue?',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -828,7 +903,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _performRestore();
             },
             style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Restore', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Restore',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -839,14 +917,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Clear All Data'),
-        content: const Text(
+        title: Text(
+          'Clear All Data',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
           'This will permanently delete all your data. This action cannot be undone. Are you sure?',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -854,9 +939,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _performClearData();
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
+            child: Text(
               'Clear Data',
-              style: TextStyle(color: Colors.white),
+              style: GoogleFonts.poppins(color: Colors.white),
             ),
           ),
         ],
@@ -868,14 +953,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text(
+        title: Text(
+          'Logout',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
           'Are you sure you want to logout? You will need to sign in again to access the app.',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -883,7 +975,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _performLogout();
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Logout', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Logout',
+              style: GoogleFonts.poppins(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -894,41 +989,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Help & Support'),
-        content: const Text(
-          'For support, please contact us at:\n\nEmail: support@posbilling.com\nPhone: +1-800-POS-BILL',
+        title: Text(
+          'Help & Support',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
+          'For help with Forward Billing POS, contact us at:\n\nsupport@yourposapp.com\n\nWe are here to help you with any issues or questions!',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
-          ElevatedButton(
+          TextButton(
             onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Close',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _showFeedbackDialog() {
+  void _showFeedbackDialog() async {
+    final Uri emailLaunchUri = Uri(
+      scheme: 'mailto',
+      path: 'support@yourposapp.com',
+      query: 'subject=Feedback for Forward Billing POS',
+    );
+    // Use url_launcher to open email app
+    // import 'package:url_launcher/url_launcher.dart';
+    // await launchUrl(emailLaunchUri);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Send Feedback'),
-        content: const Text(
-          'We value your feedback! Please share your thoughts with us.',
+        title: Text(
+          'Send Feedback',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
+          'To send feedback, email us at:\n\nsupport@yourposapp.com',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _sendFeedback();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('Send', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Close',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
         ],
       ),
@@ -939,25 +1047,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('About POS Billing'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Version: $_appVersion'),
-            const SizedBox(height: 8),
-            Text('Build: $_buildNumber'),
-            const SizedBox(height: 16),
-            const Text(
-              'A comprehensive POS billing solution for small businesses.',
-            ),
-          ],
+        title: Text(
+          'About Forward Billing POS',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
+        ),
+        content: Text(
+          'Forward Billing POS\nVersion 1.0.0\n\nA modern POS solution for your business.\n\nFor more info, visit our website or contact support.',
+          style: GoogleFonts.poppins(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2)),
         ),
         actions: [
-          ElevatedButton(
+          TextButton(
             onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: accentBlue),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
+            child: Text(
+              'Close',
+              style: GoogleFonts.poppins(color: accentBlue),
+            ),
           ),
         ],
       ),
@@ -969,14 +1073,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Implement sync logic here
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Data synced successfully!'),
+        SnackBar(
+          content: Text(
+            'Data synced successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync failed: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(
+            'Sync failed: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -985,15 +1098,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Implement backup logic here
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Backup completed successfully!'),
+        SnackBar(
+          content: Text(
+            'Backup completed successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Backup failed: $e'),
+          content: Text(
+            'Backup failed: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -1004,15 +1123,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Implement restore logic here
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Data restored successfully!'),
+        SnackBar(
+          content: Text(
+            'Data restored successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Restore failed: $e'),
+          content: Text(
+            'Restore failed: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -1023,15 +1148,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Implement clear data logic here
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All data cleared successfully!'),
+        SnackBar(
+          content: Text(
+            'All data cleared successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to clear data: $e'),
+          content: Text(
+            'Failed to clear data: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -1042,15 +1173,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       // Implement feedback logic here
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Feedback sent successfully!'),
+        SnackBar(
+          content: Text(
+            'Feedback sent successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to send feedback: $e'),
+          content: Text(
+            'Failed to send feedback: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -1063,8 +1200,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Logged out successfully!'),
+        SnackBar(
+          content: Text(
+            'Logged out successfully!',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -1072,7 +1212,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Logout failed: $e'),
+          content: Text(
+            'Logout failed: $e',
+            style: GoogleFonts.poppins(color: Colors.white),
+          ),
           backgroundColor: Colors.red,
         ),
       );

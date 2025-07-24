@@ -521,7 +521,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      backgroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
                       child: Container(
                         constraints: BoxConstraints(
                           maxHeight: maxHeight > 350 ? 350 : maxHeight,
@@ -630,8 +630,8 @@ class _PeoplesScreenState extends State<PeoplesScreen>
           alignment: Alignment.bottomCenter,
           child: Container(
             margin: const EdgeInsets.only(top: 48),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
               boxShadow: [
                 BoxShadow(
@@ -657,31 +657,33 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                     children: [
                       Text(
                         isEdit ? 'Edit Person' : 'Add Person',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF128C7E),
+                          color: Color(0xFF1976D2),
                         ),
                       ),
                       const SizedBox(height: 22),
                       _buildAttractiveTextField(
-                        controller: nameController,
-                        label: 'Name',
-                        icon: Icons.person,
+                        context,
+                        nameController,
+                        'Name',
+                        Icons.person,
                         validator: (val) {
                           if (val == null || val.trim().isEmpty)
                             return 'Name is required';
-                          final namePattern = RegExp(r'^[a-zA-Z\s]{2,40}?$');
+                          final namePattern = RegExp(r'^[a-zA-Z\-\s]{2,50}$');
                           if (!namePattern.hasMatch(val.trim()))
-                            return 'Name must be 2-40 letters and spaces only.';
+                            return 'Name must be 2-50 letters, spaces, or dashes only.';
                           return null;
                         },
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
-                        controller: phoneController,
-                        label: 'Contact No',
-                        icon: Icons.phone,
+                        context,
+                        phoneController,
+                        'Contact No',
+                        Icons.phone,
                         keyboardType: TextInputType.phone,
                         validator: (val) {
                           if (val == null || val.trim().isEmpty)
@@ -699,9 +701,10 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
-                        controller: balanceController,
-                        label: 'Balance',
-                        icon: Icons.account_balance_wallet,
+                        context,
+                        balanceController,
+                        'Balance',
+                        Icons.account_balance_wallet,
                         keyboardType: TextInputType.number,
                         validator: (val) {
                           if (val == null || val.trim().isEmpty)
@@ -713,18 +716,26 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveTextField(
-                        controller: notesController,
-                        label: 'Notes',
-                        icon: Icons.note,
+                        context,
+                        notesController,
+                        'Notes',
+                        Icons.note,
                         maxLines: 2,
+                        validator: (val) {
+                          if (val != null && val.length > 100) {
+                            return 'Notes can be at most 100 characters.';
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 18),
                       _buildAttractiveDropdown(
-                        value: selectedType,
-                        label: 'Category',
-                        icon: Icons.category,
-                        items: _getAllCategories(),
-                        onChanged: (value) {
+                        context,
+                        selectedType,
+                        'Category',
+                        Icons.category,
+                        _getAllCategories(),
+                        (value) {
                           setModalState(() {
                             selectedType = value!;
                             showOtherInput = value == 'other';
@@ -739,9 +750,10 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                         Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: _buildAttractiveTextField(
-                            controller: newCategoryController,
-                            label: 'New Category Name',
-                            icon: Icons.category,
+                            context,
+                            newCategoryController,
+                            'New Category Name',
+                            Icons.category,
                             onChanged: (value) {
                               // newOtherType = value; // This variable was removed
                             },
@@ -769,11 +781,11 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(context),
-                            child: const Text(
+                            child: Text(
                               'Cancel',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF128C7E),
+                                color: Color(0xFF1976D2),
                               ),
                             ),
                           ),
@@ -1145,20 +1157,19 @@ class _PeoplesScreenState extends State<PeoplesScreen>
       return DefaultTabController(
         length: tabLength,
         child: Scaffold(
-          backgroundColor: kWhite,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: Colors.white,
+            backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
             centerTitle: true,
             title: Text(
-              'Peoples',
-              style: const TextStyle(
-                fontSize: 22,
-                color: Color(0xFF0A2342),
+              'People',
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342),
                 fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
+                fontSize: 22,
               ),
             ),
-            iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
+            iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342)),
             elevation: 0,
             shape: const RoundedRectangleBorder(
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -1268,7 +1279,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                             children: [
                               Icon(
                                 Icons.account_balance_wallet_rounded,
-                                color: kWhite,
+                                color: Colors.white,
                                 size: 24,
                               ),
                               const SizedBox(width: 12),
@@ -1276,7 +1287,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                 child: Text(
                                   totalLabel,
                                   style: const TextStyle(
-                                    color: kWhite,
+                                    color: Colors.white,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
                                     letterSpacing: 0.5,
@@ -1301,7 +1312,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                           child: Text(
                             'Rs ${_getTotalBalance(type).toStringAsFixed(2)}',
                             style: const TextStyle(
-                              color: kWhite,
+                              color: Colors.white,
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
                               letterSpacing: 0.5,
@@ -1344,7 +1355,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                       onPressed: _showFilterDialog,
                     ),
                     filled: true,
-                    fillColor: kCardBg,
+                    fillColor: Theme.of(context).cardColor,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -1361,7 +1372,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                     ? Center(
                         child: Text(
                           'No Peoples Found',
-                          style: TextStyle(color: kGrey500, fontSize: 16),
+                          style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 16),
                         ),
                       )
                     : ListView.builder(
@@ -1382,12 +1393,12 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                   horizontal: 20,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: kRed100,
+                                  color: Theme.of(context).colorScheme.errorContainer,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.delete,
-                                  color: kRed,
+                                  color: Theme.of(context).colorScheme.error,
                                   size: 32,
                                 ),
                               ),
@@ -1412,7 +1423,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                       minHeight: 72,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Color(0xFFF8FAFC),
+                                      color: Theme.of(context).brightness == Brightness.dark ? Color(0xFF232A36) : Colors.white,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Row(
@@ -1450,9 +1461,9 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                               const SizedBox(height: 2),
                                               Text(
                                                 person.phone,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 13,
-                                                  color: kBlack87,
+                                                  color: Theme.of(context).textTheme.bodyMedium?.color,
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
@@ -1464,7 +1475,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                     'Balance: ',
                                                     style: TextStyle(
                                                       fontSize: 13,
-                                                      color: kGrey700,
+                                                      color: Theme.of(context).textTheme.bodyMedium?.color,
                                                     ),
                                                   ),
                                                   Text(
@@ -1472,8 +1483,8 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                     style: TextStyle(
                                                       fontSize: 13,
                                                       color: person.balance < 0
-                                                          ? kRed
-                                                          : kGreen,
+                                                          ? Theme.of(context).colorScheme.error
+                                                          : Theme.of(context).colorScheme.primary,
                                                       fontWeight:
                                                           FontWeight.bold,
                                                     ),
@@ -1489,7 +1500,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                       ),
                                                       style: TextStyle(
                                                         fontSize: 11,
-                                                        color: kGrey500,
+                                                        color: Theme.of(context).textTheme.bodySmall?.color,
                                                       ),
                                                       maxLines: 1,
                                                       overflow:
@@ -1520,9 +1531,9 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                 tooltip: 'Ledger',
                                               ),
                                               PopupMenuButton<String>(
-                                                icon: const Icon(
+                                                icon: Icon(
                                                   Icons.more_vert,
-                                                  color: kBlack54,
+                                                  color: Theme.of(context).textTheme.bodySmall?.color,
                                                   size: 22,
                                                 ),
                                                 onSelected: (value) {
@@ -1663,9 +1674,9 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                     value: 'call',
                                                     child: Row(
                                                       children: [
-                                                        const Icon(
+                                                        Icon(
                                                           Icons.call,
-                                                          color: kGreen,
+                                                          color: Theme.of(context).colorScheme.primary,
                                                           size: 18,
                                                         ),
                                                         const SizedBox(
@@ -1682,7 +1693,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                         Icon(
                                                           FontAwesomeIcons
                                                               .whatsapp,
-                                                          color: kGreen,
+                                                          color: Theme.of(context).colorScheme.primary,
                                                           size: 18,
                                                         ),
                                                         const SizedBox(
@@ -1759,107 +1770,95 @@ extension StringCasingExtension on String {
       isEmpty ? '' : '${this[0].toUpperCase()}${substring(1)}';
 }
 
-Widget _buildAttractiveTextField({
-  required TextEditingController controller,
-  required String label,
-  required IconData icon,
+Widget _buildAttractiveTextField(
+  BuildContext context,
+  TextEditingController controller,
+  String label,
+  IconData icon, {
   TextInputType? keyboardType,
-  String? Function(String?)? validator,
-  bool readOnly = false,
   int maxLines = 1,
-  void Function()? onTap,
+  String? Function(String?)? validator,
   IconData? suffixIcon,
-  void Function(String)? onChanged,
-  void Function()? onSuffixIconTap,
+  VoidCallback? onTap,
+  VoidCallback? onSuffixIconTap,
+  ValueChanged<String>? onChanged,
 }) {
-  return Material(
-    elevation: 1.0,
-    borderRadius: BorderRadius.circular(10),
-    shadowColor: kBlack12,
-    child: TextFormField(
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final mainColor = isDark ? Colors.white : Color(0xFF1976D2);
+  final veryLightBlue = isDark ? Color(0xFF90CAF9) : Color(0xFFB3D8FD);
+  return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      validator: validator,
-      readOnly: readOnly,
       maxLines: maxLines,
+    validator: validator,
       onTap: onTap,
       onChanged: onChanged,
-      style: const TextStyle(fontSize: 14),
+    style: TextStyle(color: mainColor),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: Color(0xFF1976D2), fontSize: 14),
-        prefixIcon: Icon(icon, color: Color(0xFF1976D2), size: 20),
+      labelStyle: TextStyle(color: mainColor, fontWeight: FontWeight.w600),
+      hintText: label,
+      hintStyle: TextStyle(color: veryLightBlue),
+      prefixIcon: Icon(icon, color: mainColor),
         suffixIcon: suffixIcon != null
             ? GestureDetector(
                 onTap: onSuffixIconTap,
-                child: Icon(suffixIcon, color: Color(0xFF1976D2), size: 20),
+              child: Icon(suffixIcon, color: mainColor),
               )
             : null,
+      filled: true,
+      fillColor: isDark ? Colors.black : Colors.white,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: veryLightBlue),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: veryLightBlue),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFF1976D2)),
-        ),
-        filled: true,
-        fillColor: kWhite,
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 10,
-          horizontal: 10,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: veryLightBlue, width: 2),
       ),
     ),
   );
 }
 
-Widget _buildAttractiveDropdown({
-  required String value,
-  required String label,
-  required IconData icon,
-  required List<String> items,
-  required void Function(String?) onChanged,
+Widget _buildAttractiveDropdown(
+  BuildContext context,
+  String value,
+  String label,
+  IconData icon,
+  List<String> items,
+  void Function(String?) onChanged, {
   String Function(String)? getDisplayName,
 }) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final mainColor = isDark ? Colors.white : Color(0xFF1976D2);
   return Material(
     elevation: 1.0,
     borderRadius: BorderRadius.circular(10),
-    shadowColor: kBlack12,
+    shadowColor: Theme.of(context).shadowColor,
     child: Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [kWhite, kF8F9FA, kF1F3F4],
-          stops: const [0.0, 0.5, 1.0],
-        ),
+        color: isDark ? Colors.black : Colors.white,
       ),
       child: DropdownButtonFormField2<String>(
         value: value,
         isExpanded: true,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 14,
-          color: kBlack87,
+          color: mainColor,
           fontWeight: FontWeight.w500,
         ),
         dropdownStyleData: DropdownStyleData(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [kWhite, kF8F9FA, kF1F3F4],
-              stops: const [0.0, 0.5, 1.0],
-            ),
+            color: isDark ? Colors.black : Colors.white,
             boxShadow: [
               BoxShadow(
-                color: kBlack87.withAlpha((0.1 * 255).toInt()),
+                color: mainColor.withAlpha((0.1 * 255).toInt()),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -1869,26 +1868,26 @@ Widget _buildAttractiveDropdown({
         ),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(
-            color: Color(0xFF1976D2),
+          labelStyle: TextStyle(
+            color: mainColor,
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
-          prefixIcon: Icon(icon, color: Color(0xFF1976D2), size: 20),
+          prefixIcon: Icon(icon, color: mainColor, size: 20),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none,
+            borderSide: BorderSide(color: mainColor),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none,
+            borderSide: BorderSide(color: mainColor),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Color(0xFF1976D2), width: 1.5),
+            borderSide: BorderSide(color: mainColor, width: 1.5),
           ),
           filled: true,
-          fillColor: kTransparent,
+          fillColor: isDark ? Colors.black : Colors.white,
           contentPadding: const EdgeInsets.symmetric(
             vertical: 12,
             horizontal: 12,
@@ -1899,7 +1898,7 @@ Widget _buildAttractiveDropdown({
             value: item,
             child: Text(
               getDisplayName?.call(item) ?? item,
-              style: const TextStyle(fontSize: 14, color: kBlack87),
+              style: TextStyle(fontSize: 14, color: mainColor),
             ),
           );
         }).toList(),

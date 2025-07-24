@@ -1,7 +1,10 @@
 import '../database/database_helper.dart';
 import '../models/inventory_item.dart';
+import 'package:flutter/foundation.dart';
+import '../repositories/activity_repository.dart';
+import '../models/activity.dart';
 
-class InventoryRepository {
+class InventoryRepository extends ChangeNotifier {
   final dbHelper = DatabaseHelper.instance;
 
   Future<List<InventoryItem>> getAllItems() async {
@@ -19,7 +22,18 @@ class InventoryRepository {
     final normalizedItem = item.copyWith(
       shortcut: item.shortcut?.trim().toUpperCase(),
     );
-    return await db.insert('inventory', normalizedItem.toMap());
+    final result = await db.insert('inventory', normalizedItem.toMap());
+    notifyListeners();
+    // Log activity
+    await ActivityRepository().logActivity(
+      Activity(
+        type: 'inventory_add',
+        description: 'Added inventory item: ${item.name}',
+        timestamp: DateTime.now(),
+        metadata: item.toMap(),
+      ),
+    );
+    return result;
   }
 
   Future<int> updateItem(InventoryItem item) async {
@@ -27,17 +41,43 @@ class InventoryRepository {
     final normalizedItem = item.copyWith(
       shortcut: item.shortcut?.trim().toUpperCase(),
     );
-    return await db.update(
+    final result = await db.update(
       'inventory',
       normalizedItem.toMap(),
       where: 'id = ?',
       whereArgs: [item.id],
     );
+    notifyListeners();
+    // Log activity
+    await ActivityRepository().logActivity(
+      Activity(
+        type: 'inventory_edit',
+        description: 'Edited inventory item: ${item.name}',
+        timestamp: DateTime.now(),
+        metadata: item.toMap(),
+      ),
+    );
+    return result;
   }
 
   Future<int> deleteItem(int id) async {
     final db = await dbHelper.database;
-    return await db.delete('inventory', where: 'id = ?', whereArgs: [id]);
+    // Get item details before deleting for logging
+    final items = await db.query('inventory', where: 'id = ?', whereArgs: [id]);
+    final result = await db.delete('inventory', where: 'id = ?', whereArgs: [id]);
+    notifyListeners();
+    // Log activity
+    if (items.isNotEmpty) {
+      await ActivityRepository().logActivity(
+        Activity(
+          type: 'inventory_delete',
+          description: 'Deleted inventory item: ${items.first['name']}',
+          timestamp: DateTime.now(),
+          metadata: items.first,
+        ),
+      );
+    }
+    return result;
   }
 
   Future<List<InventoryItem>> searchItems(String query) async {
@@ -54,9 +94,11 @@ class InventoryRepository {
   Future<void> deleteInventoryItem(int id) async {
     final db = await dbHelper.database;
     await db.delete('inventory', where: 'id = ?', whereArgs: [id]);
+    notifyListeners();
   }
 
   Future<void> saveInventoryItem(InventoryItem item) async {
     await dbHelper.insertInventoryItem(item);
+    notifyListeners();
   }
 }

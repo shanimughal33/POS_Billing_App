@@ -33,8 +33,17 @@ class SalesCubit extends Cubit<SalesState> {
 
   final List<BillItem> _items = [];
 
-  List<BillItem> get items =>
-      List.unmodifiable(_items.where((item) => !_isSold(item)));
+  List<BillItem> get items => List.unmodifiable(
+    _items.where((item) {
+      final matches = inventory.where(
+        (inv) =>
+            inv.name.trim().toLowerCase() == item.name.trim().toLowerCase(),
+      );
+      // Custom filtering: only show items that are not sold
+      return matches.isEmpty ||
+          (matches.isNotEmpty && matches.first.isSold == false);
+    }),
+  );
 
   bool _isSold(BillItem item) {
     // Check if the item exists in inventory and is marked as sold

@@ -40,9 +40,9 @@ class ReceiptScreen extends StatelessWidget {
         ),
       );
       final output = await getTemporaryDirectory();
-      final file = File("${output.path}/Bill_$billNumber.pdf");
+      final file = File("${output.path}/Bill_ billNumber.pdf");
       await file.writeAsBytes(await pdf.save());
-      await Share.shareFiles([file.path], text: 'Bill #$billNumber');
+      await Share.shareXFiles([XFile(file.path)], text: 'Bill #$billNumber');
     } catch (e) {
       print('Error sharing bill: $e');
     }
@@ -65,6 +65,13 @@ class ReceiptScreen extends StatelessWidget {
     final taxRate = double.tryParse(businessInfo.taxRate) ?? 0.0;
     final taxAmount = subtotal * (taxRate / 100);
     final grandTotal = subtotal + taxAmount;
+    // When displaying business info in the receipt, use sample data if the value is empty or not set:
+    final businessName = businessInfo.name.isNotEmpty ? businessInfo.name : 'Sample Business';
+    final businessAddress = businessInfo.address.isNotEmpty ? businessInfo.address : '123 Main St, City';
+    final businessPhone = businessInfo.phone.isNotEmpty ? businessInfo.phone : '123-456-7890';
+    final businessEmail = businessInfo.email.isNotEmpty ? businessInfo.email : 'sample@email.com';
+    final supportPhone = businessInfo.supportPhone?.isNotEmpty == true ? businessInfo.supportPhone! : businessPhone;
+    // Use these variables wherever business info is displayed in the receipt.
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -88,7 +95,7 @@ class ReceiptScreen extends StatelessWidget {
         pw.SizedBox(height: 8),
         pw.Center(
           child: pw.Text(
-            businessInfo.name,
+            businessName,
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 28,
@@ -101,7 +108,7 @@ class ReceiptScreen extends StatelessWidget {
         pw.SizedBox(height: 2),
         pw.Center(
           child: pw.Text(
-            businessInfo.address,
+            businessAddress,
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 15,
@@ -111,7 +118,7 @@ class ReceiptScreen extends StatelessWidget {
         ),
         pw.Center(
           child: pw.Text(
-            'Tel: ${businessInfo.phone}',
+            'Tel: $businessPhone',
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 15,
@@ -119,10 +126,10 @@ class ReceiptScreen extends StatelessWidget {
             ),
           ),
         ),
-        if (businessInfo.email.isNotEmpty)
+        if (businessEmail.isNotEmpty)
           pw.Center(
             child: pw.Text(
-              'Email: ${businessInfo.email}',
+              'Email: $businessEmail',
               style: pw.TextStyle(
                 font: pw.Font.courier(),
                 fontSize: 15,
@@ -133,9 +140,7 @@ class ReceiptScreen extends StatelessWidget {
         pw.SizedBox(height: 8),
         _asciiDividerPdf(),
         pw.SizedBox(height: 10),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
+        // Replace the row for Bill # and Date with two separate lines:
             pw.Text(
               'Bill #: ${billNumber.toString().padLeft(6, '0')}',
               style: pw.TextStyle(
@@ -151,8 +156,6 @@ class ReceiptScreen extends StatelessWidget {
                 fontSize: 15,
                 color: PdfColors.black,
               ),
-            ),
-          ],
         ),
         pw.SizedBox(height: 6),
         pw.Row(
@@ -530,7 +533,7 @@ class ReceiptScreen extends StatelessWidget {
         // Support/Thank you section
         pw.Center(
           child: pw.Text(
-            'Support: ${businessInfo.phone}',
+            'Support: $supportPhone',
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 13,
@@ -566,7 +569,7 @@ class ReceiptScreen extends StatelessWidget {
         ),
         pw.Center(
           child: pw.Text(
-            'For support: (123) 456-7890',
+            'For support: $supportPhone',
             style: pw.TextStyle(
               font: pw.Font.courier(),
               fontSize: 15,
@@ -671,12 +674,12 @@ class ReceiptScreen extends StatelessWidget {
         }
         final businessInfo = snapshot.data!;
         return Scaffold(
-          backgroundColor: Colors.grey[100],
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: Colors.white,
+            backgroundColor: Theme.of(context).cardColor,
             title: Text(
               'Bill #${billNumber.toString().padLeft(6, '0')}',
-              style: const TextStyle(fontSize: 18, color: Color(0xFF0A2342)),
+              style: Theme.of(context).textTheme.titleLarge,
             ),
             leading: IconButton(
               icon: const Icon(
@@ -703,7 +706,7 @@ class ReceiptScreen extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 500),
                 margin: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(8),
                   boxShadow: [
                     BoxShadow(
