@@ -32,9 +32,23 @@ class POSReceipt extends StatelessWidget {
     final receiptWidth = screenWidth > 600 ? 400.0 : screenWidth - 24;
     // Calculate subtotal and tax
     final subtotal = items.fold(0.0, (sum, item) => sum + item.total);
+    // Discount can be a fixed amount or a percentage (if you want to support both, see below)
+    double discountAmount = 0.0;
+    String discountLabel = 'Discount:';
+    if (discount > 0) {
+      double percent = discount;
+      if (discount <= 1.0) {
+        percent = discount;
+        discountLabel = 'Discount (${(discount * 100).toStringAsFixed(0)}%):';
+      } else {
+        percent = discount / 100.0;
+        discountLabel = 'Discount (${discount.toStringAsFixed(0)}%):';
+      }
+      discountAmount = subtotal * percent;
+    }
     final taxRate = double.tryParse(businessInfo.taxRate) ?? 0.0;
-    final taxAmount = ((subtotal - discount) * (taxRate / 100));
-    final grandTotal = subtotal - discount + taxAmount;
+    final taxAmount = ((subtotal - discountAmount) * (taxRate / 100));
+    final grandTotal = subtotal - discountAmount + taxAmount;
     return Center(
       child: Container(
         width: receiptWidth,
@@ -136,7 +150,7 @@ class POSReceipt extends StatelessWidget {
                                   fontFamily: 'Courier',
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                               ),
                               Text(
@@ -144,7 +158,7 @@ class POSReceipt extends StatelessWidget {
                                 style: TextStyle(
                                   fontFamily: 'Courier',
                                   fontSize: 15,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                               ),
                             ],
@@ -158,7 +172,7 @@ class POSReceipt extends StatelessWidget {
                                   fontFamily: 'Courier',
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                               ),
                               Text(
@@ -166,7 +180,7 @@ class POSReceipt extends StatelessWidget {
                                 style: TextStyle(
                                   fontFamily: 'Courier',
                                   fontSize: 15,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                               ),
                             ],
@@ -184,7 +198,7 @@ class POSReceipt extends StatelessWidget {
                           fontFamily: 'Courier',
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                          color: Colors.black,
                         ),
                       ),
                       Expanded(
@@ -193,7 +207,7 @@ class POSReceipt extends StatelessWidget {
                           style: TextStyle(
                             fontFamily: 'Courier',
                             fontSize: 15,
-                            color: Colors.black87,
+                            color: Colors.black,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -209,7 +223,7 @@ class POSReceipt extends StatelessWidget {
                           fontFamily: 'Courier',
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                          color: Colors.black,
                         ),
                       ),
                       Text(
@@ -217,7 +231,7 @@ class POSReceipt extends StatelessWidget {
                         style: TextStyle(
                           fontFamily: 'Courier',
                           fontSize: 15,
-                          color: Colors.black87,
+                          color: Colors.black,
                         ),
                       ),
                     ],
@@ -309,17 +323,17 @@ class POSReceipt extends StatelessWidget {
                                 style: TextStyle(
                                   fontFamily: 'Courier',
                                   fontSize: 15,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               SizedBox(height: 2),
                               Text(
-                                '@ Rs ${item.price.toStringAsFixed(0)} each',
+                                '@ Rs ${item.priceAsInt} each',
                                 style: TextStyle(
                                   fontFamily: 'Courier',
                                   fontSize: 15,
-                                  color: Colors.grey[800],
+                                  color: Colors.black,
                                 ),
                               ),
                             ],
@@ -327,11 +341,11 @@ class POSReceipt extends StatelessWidget {
                         ),
                         Center(
                           child: Text(
-                            item.quantity.toStringAsFixed(0),
+                            item.quantityAsInt.toString(),
                             style: TextStyle(
                               fontFamily: 'Courier',
                               fontSize: 14,
-                              color: Colors.black87,
+                              color: Colors.black,
                             ),
                           ),
                         ),
@@ -341,7 +355,7 @@ class POSReceipt extends StatelessWidget {
                             style: TextStyle(
                               fontFamily: 'Courier',
                               fontSize: 15,
-                              color: Colors.black87,
+                              color: Colors.black,
                             ),
                           ),
                         ),
@@ -370,11 +384,19 @@ class POSReceipt extends StatelessWidget {
                     children: [
                       Text(
                         'Subtotal:',
-                        style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                        style: TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 15,
+                          color: Colors.black,
+                        ),
                       ),
                       Text(
                         '${businessInfo.currency} ${subtotal.toStringAsFixed(2)}',
-                        style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                        style: TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 15,
+                          color: Colors.black,
+                        ),
                       ),
                     ],
                   ),
@@ -383,12 +405,20 @@ class POSReceipt extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Discount:',
-                          style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                          discountLabel,
+                          style: TextStyle(
+                            fontFamily: 'Courier',
+                            fontSize: 15,
+                            color: Colors.black,
+                          ),
                         ),
                         Text(
-                          '-${businessInfo.currency} ${discount.toStringAsFixed(2)}',
-                          style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                          '-${businessInfo.currency} ${discountAmount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontFamily: 'Courier',
+                            fontSize: 15,
+                            color: Colors.black,
+                          ),
                         ),
                       ],
                     ),
@@ -397,11 +427,19 @@ class POSReceipt extends StatelessWidget {
                     children: [
                       Text(
                         'Tax (${businessInfo.taxRate}%):',
-                        style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                        style: TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 15,
+                          color: Colors.black,
+                        ),
                       ),
                       Text(
                         '${businessInfo.currency} ${taxAmount.toStringAsFixed(2)}',
-                        style: TextStyle(fontFamily: 'Courier', fontSize: 15),
+                        style: TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 15,
+                          color: Colors.black,
+                        ),
                       ),
                     ],
                   ),
@@ -414,6 +452,7 @@ class POSReceipt extends StatelessWidget {
                           fontFamily: 'Courier',
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
+                          color: Colors.black,
                         ),
                       ),
                       Text(
@@ -422,6 +461,7 @@ class POSReceipt extends StatelessWidget {
                           fontFamily: 'Courier',
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
+                          color: Colors.black,
                         ),
                       ),
                     ],
@@ -446,7 +486,7 @@ class POSReceipt extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: 'Courier',
                       fontSize: 12,
-                      color: Colors.grey[700],
+                      color: Colors.black,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -528,6 +568,7 @@ class POSReceipt extends StatelessWidget {
               fontFamily: 'Courier',
               fontSize: 14,
               fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: Colors.black,
             ),
           ),
           Text(
@@ -536,6 +577,7 @@ class POSReceipt extends StatelessWidget {
               fontFamily: 'Courier',
               fontSize: 14,
               fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: Colors.black,
             ),
           ),
         ],

@@ -1,48 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
+import 'package:forward_billing_app/repositories/inventory_repository.dart';
+import 'package:forward_billing_app/utils/app_theme.dart';
+import 'package:forward_billing_app/utils/auth_utils.dart';
 import '../models/inventory_item.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../cubit/inventory_cubit.dart';
+import '../themes/app_theme.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import '../utils/app_theme.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import '../screens/login_screen.dart';
+
+// Removed strict formatter; using live validation + debounced duplicate checks
 
 class PurchaseScreen extends StatelessWidget {
   const PurchaseScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return _PurchaseScreenAutoOpenWrapper();
-  }
-}
-
-class _PurchaseScreenAutoOpenWrapper extends StatefulWidget {
-  @override
-  State<_PurchaseScreenAutoOpenWrapper> createState() =>
-      _PurchaseScreenAutoOpenWrapperState();
-}
-
-class _PurchaseScreenAutoOpenWrapperState
-    extends State<_PurchaseScreenAutoOpenWrapper> {
-  bool _opened = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_opened) {
-      _opened = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final state = context.findAncestorStateOfType<_PurchaseViewState>();
-        if (state != null && mounted) {
-          state._showItemDialog(context);
-        }
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const PurchaseView();
+    return PurchaseView();
   }
 }
 
@@ -56,20 +34,50 @@ class PurchaseView extends StatefulWidget {
 class _PurchaseViewState extends State<PurchaseView> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  String _searchQuery = '';
   final ScrollController _scrollController = ScrollController();
+  String _searchQuery = '';
+  // Legacy state kept for compatibility (do not drive rebuilds)
+  String _sortBy = 'name'; // or 'quantity'
+  bool _sortDescending = false;
+  bool _showLowStockOnly = false;
+  final ValueNotifier<String> _searchQueryNotifier = ValueNotifier('');
+  // New: filter notifiers so only the list/stream rebuilds
+  final ValueNotifier<String> _sortByNotifier = ValueNotifier('name');
+  final ValueNotifier<bool> _sortDescendingNotifier = ValueNotifier(false);
+  final ValueNotifier<bool> _lowStockOnlyNotifier = ValueNotifier(false);
+  String? shortcutErrorText;
+  Timer? _shortcutDebounce;
+  String? _shortcutDuplicateMsg; // validator-driven duplicate error
+  String? _lastShortcutChecked;  // value used for last dup check
 
   @override
   void initState() {
     super.initState();
-    // Auto-open Add Item form (no autofocus)
+
+    // Auto-open Add Item dialog (bottom sheet) on screen load
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showItemDialog(context);
+      final ctx = context;
+      if (mounted) {
+        _showItemDialog(ctx); // Open dialog for adding new item
+      }
+    });
+
+    // Always load inventory when this screen is opened
+    Future.microtask(() async {
+      final userId = await getCurrentUserUid();
+      if (userId != null) {
+        // context.read<InventoryCubit>().loadInventory(userId: userId);
+      }
     });
   }
 
   @override
   void dispose() {
+    _shortcutDebounce?.cancel();
+    _searchQueryNotifier.dispose();
+    _sortByNotifier.dispose();
+    _sortDescendingNotifier.dispose();
+    _lowStockOnlyNotifier.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -84,25 +92,23 @@ class _PurchaseViewState extends State<PurchaseView> {
   }
 
   void _search(String query) {
-    setState(() {
-      _searchQuery = query;
-    });
+    _searchQueryNotifier.value = query;
   }
 
-  // --- BUDGET LOGIC ---
-  bool _isLowBudget(InventoryItem item) {
-    // Let's assume initialQuantity is initial budget, quantity is remaining budget
-    final lowBudgetThreshold = item.initialQuantity * 0.2;
-    return item.quantity <= lowBudgetThreshold;
+  bool _isLowStock(InventoryItem item) {
+    // Calculate 20% of the initial quantity
+    final lowStockThreshold = item.initialQuantity * 0.2;
+    return item.quantity <= lowStockThreshold;
   }
 
   Widget _buildInventoryList(BuildContext context, List<InventoryItem> items) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Inventory-style stats summary
+          // Stats summary
           Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(16),
@@ -116,7 +122,7 @@ class _PurchaseViewState extends State<PurchaseView> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(18),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.08),
@@ -131,84 +137,152 @@ class _PurchaseViewState extends State<PurchaseView> {
                 _buildStatItem(
                   'Total Items',
                   items.length.toString(),
-                  Icons.shopping_cart_rounded,
+                  Icons.inventory_2,
                 ),
                 _buildStatItem(
                   'Total Value',
-                  'Rs ${_calculateTotal(items).toStringAsFixed(2)}',
+                  'Rs  ${_calculateTotalValue(items)}',
                   Icons.account_balance,
                 ),
                 _buildStatItem(
-                  'Total Qty',
-                  _calculateTotalQty(items).toString(),
-                  Icons.format_list_numbered,
+                  'Low Stock',
+                  items.where((item) => _isLowStock(item)).length.toString(),
+                  Icons.warning,
                 ),
               ],
             ),
           ).animate().fade(duration: 400.ms).slideY(begin: -0.5),
 
-          // Search bar (moved below stats)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: kCardBg,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  spreadRadius: 1,
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child:
-                TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: _search,
-              style: const TextStyle(fontSize: 16),
-              decoration: InputDecoration(
-                hintText: 'Search items...',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: kCardBg,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
-                    )
-                    .animate()
-                    .fade(delay: 200.ms, duration: 400.ms)
-                    .slideY(begin: -0.5),
-          ),
-
-          // Items list
-          Expanded(
-            child: items.isEmpty
-                ? _buildEmptyState()
-                : InteractiveViewer(
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    minScale: 1.0,
-                    maxScale: 3.0,
-                    child: ListView.builder(
-                    controller: _scrollController,
-                    itemCount: items.length,
-                    itemBuilder: (context, index) =>
-                          _buildItemCard(items[index])
-                              .animate()
-                              .fade(delay: (100 * index).ms)
-                              .slideY(begin: 0.5),
+          // Search bar
+          Row(
+            children: [
+              Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.only(bottom: 16, right: 8),
+                  decoration: BoxDecoration(
+                    color: kCardBg,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withAlpha(25),
+                        spreadRadius: 1,
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    onChanged: _search,
+                    style: const TextStyle(fontSize: 16),
+                    decoration: InputDecoration(
+                      hintText: 'Search items...',
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                      prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: isDark ? Colors.black : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Color(0xFF0A2342),
+                      Color(0xFF123060),
+                      Color(0xFF1976D2),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: IconButton(
+                  icon: Icon(Icons.filter_alt, color: Colors.white),
+                  onPressed: _showFilterDialog,
+                  tooltip: 'Filter',
+                ),
+              ),
+            ],
+          ).animate().fade(delay: 200.ms, duration: 400.ms).slideY(begin: -0.5),
+
+          // Item list
+          Expanded(
+            child: ValueListenableBuilder<String>(
+              valueListenable: _sortByNotifier,
+              builder: (context, sortBy, _) => ValueListenableBuilder<bool>(
+                valueListenable: _sortDescendingNotifier,
+                builder: (context, descending, __) =>
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _lowStockOnlyNotifier,
+                      builder: (context, lowStockOnly, ___) {
+                        return ValueListenableBuilder<String>(
+                          valueListenable: _searchQueryNotifier,
+                          builder: (context, query, ____) {
+                            final base = lowStockOnly
+                                ? items.where((it) => _isLowStock(it)).toList()
+                                : items;
+                            // Perform simple in-memory sort
+                            final List<InventoryItem> working = List.of(base);
+                            if (sortBy == 'quantity') {
+                              working.sort(
+                                (a, b) => a.quantity.compareTo(b.quantity),
+                              );
+                            } else {
+                              working.sort(
+                                (a, b) => a.name.toLowerCase().compareTo(
+                                  b.name.toLowerCase(),
+                                ),
+                              );
+                            }
+                            if (descending) {
+                              working.setAll(0, working.reversed);
+                            }
+
+                            final filteredItems = query.isEmpty
+                                ? working
+                                : working.where((item) {
+                                    final lowerQuery = query.toLowerCase();
+                                    return item.name.toLowerCase().contains(
+                                          lowerQuery,
+                                        ) ||
+                                        (item.shortcut?.toLowerCase().contains(
+                                              lowerQuery,
+                                            ) ??
+                                            false);
+                                  }).toList();
+
+                            if (filteredItems.isEmpty) {
+                              return _buildEmptyState();
+                            }
+
+                            return ListView.builder(
+                              controller: _scrollController,
+                              itemCount: filteredItems.length,
+                              itemBuilder: (context, index) =>
+                                  _buildItemCard(filteredItems[index])
+                                      .animate()
+                                      .fade(delay: (100 * index).ms)
+                                      .slideY(begin: 0.5),
+                            );
+                          },
+                        );
+                      },
+                    ),
+              ),
+            ),
           ),
         ],
       ),
@@ -224,12 +298,12 @@ class _PurchaseViewState extends State<PurchaseView> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: kWhite, size: 24),
+        Icon(icon, color: Colors.white, size: 24),
         const SizedBox(height: 8),
         Text(
           displayValue,
           style: const TextStyle(
-            color: kWhite,
+            color: Colors.white,
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -243,19 +317,28 @@ class _PurchaseViewState extends State<PurchaseView> {
     );
   }
 
-  String _calculateTotalBudget(List<InventoryItem> items) {
-    // Sum of all remaining budgets (quantity as budget)
-    final total = items.fold<double>(0, (sum, item) => sum + item.quantity);
+  String _calculateTotalValue(List<InventoryItem> items) {
+    final total = items.fold<double>(
+      0,
+      (sum, item) => sum + (item.price * item.quantity),
+    );
     return total.toStringAsFixed(2);
   }
 
   Widget _buildItemCard(InventoryItem item) {
-    final isLowBudget = _isLowBudget(item);
+    final isLowStock = _isLowStock(item);
+    final isExhausted = item.quantity == 0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: isDark
+          ? (isExhausted
+                ? const Color.fromARGB(255, 250, 28, 28)
+                : const Color(0xFF013A63))
+          : (isExhausted ? const Color.fromARGB(255, 250, 35, 35) : null),
       child: InkWell(
         onTap: () => _showItemDialog(context, item: item),
         borderRadius: BorderRadius.circular(12),
@@ -270,10 +353,14 @@ class _PurchaseViewState extends State<PurchaseView> {
                     // Name row only
                     Text(
                       item.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: kBlue,
+                        color: isDark
+                            ? (isExhausted ? Colors.white : Colors.white)
+                            : (isExhausted
+                                  ? Colors.white
+                                  : AppTheme.getPrimaryColor(context)),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -281,10 +368,14 @@ class _PurchaseViewState extends State<PurchaseView> {
                       children: [
                         Text(
                           '₨${item.price.toStringAsFixed(2)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color: kBlue,
+                            color: isDark
+                                ? (isExhausted ? Colors.white : Colors.white)
+                                : (isExhausted
+                                      ? Colors.white
+                                      : AppTheme.getPrimaryColor(context)),
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -294,9 +385,9 @@ class _PurchaseViewState extends State<PurchaseView> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: isLowBudget
-                                ? Colors.red.withAlpha(51)
-                                : Colors.green.withAlpha(51),
+                            color: isLowStock
+                                ? Colors.red.withAlpha(25)
+                                : Colors.green.withAlpha(25),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -304,11 +395,13 @@ class _PurchaseViewState extends State<PurchaseView> {
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: isLowBudget ? Colors.red : Colors.green,
+                              color: isExhausted
+                                  ? Colors.white
+                                  : (isLowStock ? Colors.red : Colors.green),
                             ),
                           ),
                         ),
-                        // Shortcut container placed next to budget
+                        // Shortcut container placed next to quantity
                         if (item.shortcut != null && item.shortcut!.isNotEmpty)
                           Container(
                             margin: const EdgeInsets.only(left: 10),
@@ -317,27 +410,33 @@ class _PurchaseViewState extends State<PurchaseView> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color.fromARGB(
-                                255,
-                                217,
-                                234,
-                                250,
-                              ), // Blue color
+                              color: isExhausted
+                                  ? Colors.red
+                                  : const Color.fromARGB(
+                                      255,
+                                      173,
+                                      218,
+                                      255,
+                                    ), // Blue color
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Row(
                               children: [
                                 Icon(
                                   Icons.shortcut_sharp,
-                                  color: Colors.blue.shade500,
+                                  color: isExhausted
+                                      ? Colors.white
+                                      : Colors.blue.shade500,
                                   size: 16,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   item.shortcut!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.blue,
+                                    color: isExhausted
+                                        ? Colors.white
+                                        : Colors.blue,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -350,12 +449,14 @@ class _PurchaseViewState extends State<PurchaseView> {
                 ),
               ),
               IconButton(
-                icon: const Icon(
+                icon: Icon(
                   Icons.delete_outline,
-                  color: Colors.red,
+                  color: isDark
+                      ? (isExhausted ? Colors.white : Colors.white)
+                      : (isExhausted ? Colors.white : Colors.red),
                   size: 24,
                 ),
-                onPressed: () => _deleteItem(context, item.id!),
+                onPressed: () => _deleteItem(context, item),
               ),
             ],
           ),
@@ -389,264 +490,329 @@ class _PurchaseViewState extends State<PurchaseView> {
     );
   }
 
-  void _showItemDialog(BuildContext context, {InventoryItem? item}) {
+  void _showItemDialog(BuildContext context, {InventoryItem? item}) async {
     final nameController = TextEditingController(text: item?.name);
-    final priceController = TextEditingController(text: item?.price.toString());
+    final priceController = TextEditingController(
+      text: item == null
+          ? ''
+          : (item.price % 1 == 0
+                ? item.price.toInt().toString()
+                : item.price.toString()),
+    );
     final quantityController = TextEditingController(
-      text: item?.quantity.toString(),
+      text: item == null ? '' : item.quantity.toInt().toString(),
     );
     final shortcutController = TextEditingController(text: item?.shortcut);
     final formKey = GlobalKey<FormState>();
-    final nameFocus = FocusNode();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (context) => Align(
+        alignment: Alignment.bottomCenter,
+        child: Container(
+          margin: const EdgeInsets.only(top: 48),
+          decoration: BoxDecoration(
+            color: AppTheme.getCardColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black12,
+                blurRadius: 16,
+                offset: Offset(0, -4),
+              ),
+            ],
           ),
-        ),
-        padding: EdgeInsets.only(
-          top: 24,
-          left: 24,
-          right: 24,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-        ),
-        child: SingleChildScrollView(
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item == null ? 'Add New Item' : 'Edit Item',
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: nameController,
-                  focusNode: nameFocus,
-                  decoration: InputDecoration(
-                    labelText: 'Item Name',
-                    hintText: 'Enter item name',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: kBlue, width: 2),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item == null ? 'Add New Item' : 'Edit Item',
+                    style: TextStyle(
+                      color: const Color(0xFF1976D2),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
                     ),
                   ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter item name';
-                    }
-                    final pattern = RegExp(r'^[a-zA-Z0-9\-\s]{2,50}$');
-                    if (!pattern.hasMatch(value.trim())) {
-                      return '2-50 letters, numbers, spaces, or dashes only';
-                    }
-                    return null;
-                  },
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: priceController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'Price (₨)',
-                    hintText: 'Enter price',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: nameController,
+                    decoration: AppTheme.getStandardInputDecoration(
+                      context,
+                      labelText: 'Item Name',
+                      hintText: 'Enter item name',
+                      prefixIcon: Icons.title,
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: kBlue, width: 2),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter price';
-                    }
-                    final price = double.tryParse(value);
-                    if (price == null || price <= 0) {
-                      return 'Please enter a valid price (>0)';
-                    }
-                    return null;
-                  },
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: quantityController,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                  decoration: InputDecoration(
-                    labelText: 'Quantity',
-                    hintText: 'Enter quantity',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: kBlue, width: 2),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter quantity';
-                    }
-                    final quantity = int.tryParse(value);
-                    if (quantity == null || quantity <= 0) {
-                      return 'Please enter a valid quantity (>0, integer)';
-                    }
-                    return null;
-                  },
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: shortcutController,
-                  decoration: InputDecoration(
-                    labelText: 'Shortcut (Optional)',
-                    hintText: 'Enter shortcut code',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFFBBDEFB),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: kBlue, width: 2),
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) return null;
-                    final pattern = RegExp(r'^[A-D][0-9]{1,4} ?$');
-                    if (!pattern.hasMatch(value)) {
-                      if (RegExp(r'^[0-9]+$').hasMatch(value)) {
-                        return 'Shortcut cannot be only numbers. It must start with A, B, C, or D followed by 1-4 digits (e.g., A1, B12, C123, D1234).';
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter item name';
                       }
-                      if (!RegExp(r'^[A-D]').hasMatch(value)) {
-                        return 'Shortcut must start with A, B, C, or D (uppercase only).';
+                      final pattern = RegExp(r'^[a-zA-Z0-9\-\s]{2,50}$');
+                      if (!pattern.hasMatch(value.trim())) {
+                        return '2-50 letters, numbers, spaces, or dashes only';
                       }
-                      if (!RegExp(r'^[A-D][0-9]+$').hasMatch(value)) {
-                        return 'Shortcut must be a letter (A-D) followed by 1-4 digits (e.g., A1, B12, C123, D1234).';
-                      }
-                      if (value.length > 5) {
-                        return 'Shortcut can be at most 5 characters (1 letter + up to 4 digits).';
-                      }
-                      return 'Invalid shortcut format.';
-                    }
-                    // Check for duplicate shortcut (case-insensitive, except for current item)
-                    final inventoryState = context.read<InventoryCubit>().state;
-                    if (inventoryState is InventoryLoaded) {
-                      final shortcutUpper = value.toUpperCase();
-                      final duplicate = inventoryState.items.any((inv) {
-                        if (item != null && inv.id == item.id) return false;
-                        return (inv.shortcut ?? '').toUpperCase() ==
-                            shortcutUpper;
-                      });
-                      if (duplicate) {
-                        return 'This shortcut is already in use by another item.';
-                      }
-                    }
-                    return null;
-                  },
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2),
+                      return null;
+                    },
                   ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text('Cancel', style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF1976D2))),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: priceController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                    const SizedBox(width: 16),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Color(0xFF1976D2),
-                        foregroundColor: Colors.white,
-                        textStyle: const TextStyle(fontWeight: FontWeight.bold),
-                        side: BorderSide.none,
-                      ),
-                      child: Text(
-                        'Save',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onPressed: () async {
-                        if (formKey.currentState!.validate()) {
-                          final newItem = InventoryItem(
-                            id: item?.id,
-                            name: nameController.text,
-                            price: double.parse(priceController.text),
-                            quantity: double.parse(quantityController.text),
-                            shortcut: shortcutController.text.isEmpty
-                                ? null
-                                : shortcutController.text,
-                          );
-
-                          context.read<InventoryCubit>().saveInventoryItem(
-                            newItem,
-                          );
-                          await _logInventoryActivity(item, newItem);
-                          Navigator.pop(context);
+                    decoration: AppTheme.getStandardInputDecoration(
+                      context,
+                      labelText: 'Price (₨)',
+                      hintText: 'Enter price',
+                      prefixIcon: Icons.attach_money,
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter price';
+                      }
+                      final price = double.tryParse(value);
+                      if (price == null || price <= 0) {
+                        return 'Please enter a valid price (>0)';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: quantityController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: false,
+                    ),
+                    decoration: AppTheme.getStandardInputDecoration(
+                      context,
+                      labelText: 'Quantity',
+                      hintText: 'Enter quantity',
+                      prefixIcon: Icons.numbers,
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter quantity';
+                      }
+                      final quantity = int.tryParse(value);
+                      if (quantity == null || quantity <= 0) {
+                        return 'Please enter a valid quantity (>0, integer)';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: shortcutController,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: AppTheme.getStandardInputDecoration(
+                      context,
+                      labelText: 'Shortcut',
+                      hintText: 'Enter shortcut code',
+                      prefixIcon: Icons.bolt,
+                    ).copyWith(errorText: shortcutErrorText),
+                    inputFormatters: [
+                      LengthLimitingTextInputFormatter(5),
+                    ],
+                    onChanged: (value) async {
+                      final input = value.trim().toUpperCase();
+                      // Synchronous format validation
+                      String? formatErr;
+                      if (input.isEmpty) {
+                        formatErr = null; // no required error while typing
+                      } else if (!RegExp(r'^[A-D]').hasMatch(input)) {
+                        formatErr = 'Shortcut must start with A, B, C, or D.';
+                      } else {
+                        final digits = input.length > 1 ? input.substring(1) : '';
+                        if (digits.isEmpty) {
+                          formatErr = 'Enter 1–4 digits after the letter.';
+                        } else if (!RegExp(r'^[0-9]+$').hasMatch(digits)) {
+                          formatErr = 'Only digits are allowed after the letter.';
+                        } else if (digits.length > 4) {
+                          formatErr = 'Shortcut cannot have more than 4 digits.';
                         }
-                      },
-                    ),
-                  ],
-                ),
-              ],
+                      }
+
+                      setState(() {
+                        shortcutErrorText = formatErr; // format errors via decoration
+                        // reset duplicate state when typing
+                        _shortcutDuplicateMsg = null;
+                        _lastShortcutChecked = null;
+                      });
+
+                      // Debounced duplicate check only when format is valid
+                      _shortcutDebounce?.cancel();
+                      if (formatErr != null || input.isEmpty) return;
+                      _shortcutDebounce = Timer(const Duration(milliseconds: 350), () async {
+                        final userId = await getCurrentUserUid();
+                        if (!mounted || userId == null) return;
+                        final isDuplicate = await context
+                            .read<InventoryRepository>()
+                            .isShortcutTaken(
+                              userId,
+                              input,
+                              excludeId: item?.firestoreId,
+                            );
+                        if (!mounted) return;
+                        setState(() {
+                          _lastShortcutChecked = input;
+                          _shortcutDuplicateMsg = isDuplicate
+                              ? 'This shortcut is already used by another item.'
+                              : null;
+                        });
+                        // Re-run validators so the error shows immediately
+                        formKey.currentState?.validate();
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Shortcut is required';
+                      }
+
+                      // Specific checks for clearer errors
+                      final input = value.trim().toUpperCase();
+                      // 1) Prefix must be A/B/C/D
+                      if (!RegExp(r'^[A-D]').hasMatch(input)) {
+                        return 'Shortcut must start with A, B, C, or D.';
+                      }
+                      final digits = input.length > 1 ? input.substring(1) : '';
+                      // 2) Must have 1–4 digits after the letter
+                      if (digits.isEmpty) {
+                        return 'Enter 1–4 digits after the letter.';
+                      }
+                      if (!RegExp(r'^[0-9]+$').hasMatch(digits)) {
+                        return 'Only digits are allowed after the letter.';
+                      }
+                      if (digits.length > 4) {
+                        return 'Shortcut cannot have more than 4 digits.';
+                      }
+
+                      // 3) Duplicate check result (if any) should show instantly
+                      if (_lastShortcutChecked != null &&
+                          input == _lastShortcutChecked &&
+                          _shortcutDuplicateMsg != null) {
+                        return _shortcutDuplicateMsg;
+                      }
+
+                      return null; // No sync error
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: TextButton.styleFrom(
+                          foregroundColor:
+                              Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white
+                              : const Color(0xFF1976D2),
+                        ),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Container(
+                        decoration: AppTheme.getGradientDecoration(),
+                        child: ElevatedButton(
+                          style: AppTheme.getGradientSaveButtonStyle(context),
+                          onPressed: () async {
+                            // Clear any previous error shown
+                            setState(() {
+                              _shortcutDuplicateMsg = null;
+                              _lastShortcutChecked = null;
+                            });
+
+                            // Run sync validation
+                            if (!formKey.currentState!.validate()) return;
+
+                            final userId = await getCurrentUserUid();
+                            if (userId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('User not authenticated.'),
+                                ),
+                              );
+                              return;
+                            }
+
+                            final shortcutInput = shortcutController.text
+                                .trim();
+                            final normalizedShortcut = shortcutInput
+                                .toUpperCase();
+
+                            // 🔁 Check for duplicate shortcut (async)
+                            final isDuplicate = await context
+                                .read<InventoryRepository>()
+                                .isShortcutTaken(
+                                  userId,
+                                  normalizedShortcut,
+                                  excludeId: item?.firestoreId,
+                                );
+
+                            if (isDuplicate) {
+                              setState(() {
+                                _lastShortcutChecked = normalizedShortcut;
+                                _shortcutDuplicateMsg =
+                                    'This shortcut is already used by another item.';
+                              });
+                              // Trigger validator to surface the error immediately
+                              formKey.currentState!.validate();
+                              return;
+                            }
+
+                            // Clear async error if validation passed
+                            setState(() {
+                              shortcutErrorText = null;
+                            });
+
+                            final newItem = InventoryItem(
+                              userId: userId,
+                              firestoreId: item?.firestoreId,
+                              name: nameController.text.trim(),
+                              price: double.parse(priceController.text.trim()),
+                              quantity: double.parse(
+                                quantityController.text.trim(),
+                              ),
+                              shortcut: normalizedShortcut,
+                            );
+
+                            if (item == null) {
+                              await context
+                                  .read<InventoryRepository>()
+                                  .insertItem(newItem);
+                            } else {
+                              await context
+                                  .read<InventoryRepository>()
+                                  .updateItem(newItem);
+                            }
+
+                            Navigator.pop(context);
+                            await _logInventoryActivity(item, newItem, userId);
+                          },
+                          child: const Text('Save'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -654,148 +820,248 @@ class _PurchaseViewState extends State<PurchaseView> {
     );
   }
 
-  Future<void> _logInventoryActivity(
-    InventoryItem? oldItem,
-    InventoryItem newItem,
-  ) async {
-    await ActivityRepository().logActivity(
-      Activity(
-        type: oldItem == null ? 'purchase_add' : 'purchase_edit',
-        description: (oldItem == null ? 'Added' : 'Edited') + ' purchase item: ' + newItem.name,
-        timestamp: DateTime.now(),
-        metadata: {
-          'id': newItem.id,
-          'name': newItem.name,
-          'price': newItem.price,
-          'quantity': newItem.quantity,
-          'shortcut': newItem.shortcut,
-        },
-      ),
-    );
-    await ActivityRepository().logActivity(
-      Activity(
-        type: oldItem == null ? 'inventory_add' : 'inventory_edit',
-        description: (oldItem == null ? 'Added' : 'Edited') + ' inventory item: ' + newItem.name,
-        timestamp: DateTime.now(),
-        metadata: {
-          'id': newItem.id,
-          'name': newItem.name,
-          'price': newItem.price,
-          'quantity': newItem.quantity,
-          'shortcut': newItem.shortcut,
-        },
-      ),
-    );
-  }
-
-  Future<void> _deleteItem(BuildContext context, int id) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Item'),
-        content: const Text('Are you sure you want to delete this item?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      context.read<InventoryCubit>().deleteInventoryItem(id);
-      await _logDeleteInventoryActivity(id);
+  Future<void> _deleteItem(BuildContext context, InventoryItem item) async {
+    try {
+      debugPrint(
+        'Attempting to delete item: \\${item.name} (firestoreId: \\${item.firestoreId})',
+      );
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Item'),
+          content: Text('Are you sure you want to delete "${item.name}"?'),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              child: const Text('Delete'),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        if (item.firestoreId == null) {
+          debugPrint('Error: Cannot delete item without firestoreId');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error: Item missing Firestore ID.')),
+          );
+          return;
+        }
+        await context.read<InventoryRepository>().deleteItem(
+          item.firestoreId!,
+          item.userId,
+        );
+        debugPrint('Item deleted in Firestore: \\${item.firestoreId}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Item deleted successfully.')),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('Error deleting item: $e\\n$st');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error deleting item: $e')));
     }
   }
 
-  Future<void> _logDeleteInventoryActivity(int id) async {
-    await ActivityRepository().logActivity(
-      Activity(
-        type: 'purchase_delete',
-        description: 'Deleted purchase item with id: $id',
-        timestamp: DateTime.now(),
-        metadata: {'id': id},
-      ),
-    );
-    await ActivityRepository().logActivity(
-      Activity(
-        type: 'inventory_delete',
-        description: 'Deleted inventory item with id: $id',
-        timestamp: DateTime.now(),
-        metadata: {'id': id},
-      ),
+  void _showFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        // Temp variables for dialog state
+        bool tempShowLowStockOnly = _showLowStockOnly;
+        String tempSortBy = _sortBy;
+        bool tempDescending = _sortDescending;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: const Text('Filter & Sort'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CheckboxListTile(
+                  value: tempShowLowStockOnly,
+                  onChanged: (v) =>
+                      setModalState(() => tempShowLowStockOnly = v ?? false),
+                  title: const Text('Show only low stock'),
+                ),
+                const Divider(),
+                const Text('Sort by:'),
+                RadioListTile<String>(
+                  value: 'name',
+                  groupValue: tempSortBy,
+                  onChanged: (v) => setModalState(() => tempSortBy = v!),
+                  title: const Text('Name'),
+                ),
+                RadioListTile<String>(
+                  value: 'quantity',
+                  groupValue: tempSortBy,
+                  onChanged: (v) => setModalState(() => tempSortBy = v!),
+                  title: const Text('Quantity'),
+                ),
+                SwitchListTile(
+                  title: const Text('Descending order'),
+                  value: tempDescending,
+                  onChanged: (v) => setModalState(() => tempDescending = v),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Color(0xFF1976D2),
+                  textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                  side: BorderSide.none,
+                ),
+                child: const Text(
+                  'Apply',
+                  style: TextStyle(color: Color(0xFF1976D2)),
+                ),
+                onPressed: () {
+                  // Update notifiers so only the list rebuilds
+                  _lowStockOnlyNotifier.value = tempShowLowStockOnly;
+                  _sortByNotifier.value = tempSortBy;
+                  _sortDescendingNotifier.value = tempDescending;
+                  // Keep legacy vars in sync in case other code reads them
+                  _showLowStockOnly = tempShowLowStockOnly;
+                  _sortBy = tempSortBy;
+                  _sortDescending = tempDescending;
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : kWhite,
+      backgroundColor: isDark
+          ? const Color(0xFF0A2342)
+          : Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
+        backgroundColor: isDark ? const Color(0xFF1A2233) : Colors.white,
         centerTitle: true,
         title: Text(
-          'Purchase Management',
+          'Purchase',
           style: TextStyle(
             fontSize: 22,
-            color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342),
+            color: isDark ? Colors.white : Color(0xFF0A2342),
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
           ),
         ),
-        iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342)),
+        iconTheme: IconThemeData(
+          color: isDark ? Colors.white : Color(0xFF0A2342),
+        ),
         elevation: 0,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
         ),
       ),
-      body: BlocBuilder<InventoryCubit, InventoryState>(
-        builder: (context, state) {
-          if (state is InventoryLoading) {
-            return const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(kBlue),
-              ),
-            );
-          } else if (state is InventoryLoaded) {
-            final items = _searchQuery.isEmpty
-                ? state.items
-                : state.items
-                      .where(
-                        (item) =>
-                            item.name.toLowerCase().contains(
-                              _searchQuery.toLowerCase(),
-                            ) ||
-                            (item.shortcut ?? '').toLowerCase().contains(
-                              _searchQuery.toLowerCase(),
+      body: FutureBuilder<String?>(
+        future: getCurrentUserUid(),
+        builder: (ctx, usnap) {
+          if (!usnap.hasData)
+            return const Center(child: CircularProgressIndicator());
+
+          final userId = usnap.data!;
+
+          return StreamBuilder<List<InventoryItem>>(
+            stream: context.read<InventoryRepository>().streamFilteredItems(
+              userId,
+              sortBy: _sortBy,
+              descending: _sortDescending,
+              lowStockOnly: _showLowStockOnly,
+            ),
+            builder: (ctx, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snap.hasError) {
+                debugPrint('PurchaseScreen Error: ${snap.error}');
+                if (snap.stackTrace != null) {
+                  debugPrint('StackTrace: ${snap.stackTrace}');
+                }
+                return Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error, color: Colors.red, size: 48),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'An error occurred loading purchase:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          snap.error.toString(),
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                        if (snap.stackTrace != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                              snap.stackTrace.toString(),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey,
+                              ),
                             ),
-                      )
-                      .toList();
-            return _buildInventoryList(context, items);
-          } else if (state is InventoryError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error: ${state.message}',
-                    style: const TextStyle(fontSize: 16, color: Colors.red),
+                          ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            );
-          }
-          return const SizedBox.shrink();
+                );
+              }
+
+              if (!snap.hasData) {
+                return const Center(child: Text('No purchase data available.'));
+              }
+
+              final items = snap.data!
+                  .where((item) => !item.isDeleted)
+                  .toList();
+
+              return ValueListenableBuilder<String>(
+                valueListenable: _searchQueryNotifier,
+                builder: (context, query, _) {
+                  final filtered = query.isEmpty
+                      ? items
+                      : items.where((item) {
+                          final lowerQuery = query.toLowerCase();
+                          return item.name.toLowerCase().contains(lowerQuery) ||
+                              (item.shortcut?.toLowerCase().contains(
+                                    lowerQuery,
+                                  ) ??
+                                  false);
+                        }).toList();
+
+                  return _buildInventoryList(context, filtered);
+                },
+              );
+            },
+          );
         },
       ),
+
       floatingActionButton: Container(
         height: 56,
         width: 56,
@@ -822,12 +1088,27 @@ class _PurchaseViewState extends State<PurchaseView> {
       ),
     );
   }
+}
 
-  double _calculateTotal(List<InventoryItem> items) {
-    return items.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
-  }
-
-  int _calculateTotalQty(List<InventoryItem> items) {
-    return items.fold(0, (sum, item) => sum + item.quantity.toInt());
-  }
+Future<void> _logInventoryActivity(
+  InventoryItem? oldItem,
+  InventoryItem newItem,
+  String userId,
+) async {
+  await ActivityRepository().logActivity(
+    Activity(
+      userId: userId,
+      type: oldItem == null ? 'purchase_add' : 'purchase_edit',
+      description:
+          '${oldItem == null ? 'Added' : 'Edited'} inventory item: ${newItem.name}',
+      timestamp: DateTime.now(),
+      metadata: {
+        'firestoreId': newItem.firestoreId,
+        'name': newItem.name,
+        'price': newItem.price,
+        'quantity': newItem.quantity,
+        'shortcut': newItem.shortcut,
+      },
+    ),
+  );
 }

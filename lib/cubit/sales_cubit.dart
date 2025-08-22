@@ -3,12 +3,17 @@ import '../models/bill_item.dart';
 import '../models/inventory_item.dart';
 import '../repositories/bill_repository.dart';
 import '../utils/shortcut_validator.dart';
+import 'package:flutter/foundation.dart';
 
 part 'sales_state.dart';
 
 class SalesCubit extends Cubit<SalesState> {
   final List<InventoryItem> inventory;
   final BillRepository billRepository = BillRepository();
+
+  // Per-user in-memory cart isolation
+  final Map<String, List<BillItem>> _userCarts = {};
+  String? _currentUserId;
 
   // Build the shortcut map once at construction for instant lookup
   late final Map<String, InventoryItem> _shortcutMap = _createShortcutMap();
@@ -31,7 +36,12 @@ class SalesCubit extends Cubit<SalesState> {
 
   SalesCubit(this.inventory) : super(SalesInitial());
 
-  final List<BillItem> _items = [];
+  List<BillItem> get _items => _userCarts[_currentUserId] ?? <BillItem>[];
+  set _items(List<BillItem> value) {
+    if (_currentUserId != null) {
+      _userCarts[_currentUserId!] = value;
+    }
+  }
 
   List<BillItem> get items => List.unmodifiable(
     _items.where((item) {
@@ -45,6 +55,14 @@ class SalesCubit extends Cubit<SalesState> {
     }),
   );
 
+  // Set the current user and switch cart
+  void setCurrentUser(String userId) {
+    _currentUserId = userId;
+    // Ensure a cart exists for this user
+    _userCarts.putIfAbsent(userId, () => <BillItem>[]);
+    emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+  }
+
   bool _isSold(BillItem item) {
     // Check if the item exists in inventory and is marked as sold
     final matches = inventory.where(
@@ -53,15 +71,17 @@ class SalesCubit extends Cubit<SalesState> {
     return matches.isNotEmpty && matches.first.isSold == true;
   }
 
-  Future<void> loadSalesFromDb() async {
+  Future<void> loadSalesFromDb(String userId) async {
+    debugPrint('SalesCubit: loadSalesFromDb called for userId=$userId');
     try {
-      final dbItems = await billRepository.getAllBillItems();
-      _items.clear();
-      _items.addAll(dbItems);
+      final dbItems = await billRepository.getAllBillItemsForUser(userId);
+      _userCarts[userId] = dbItems;
+      debugPrint('SalesCubit: Loaded ${dbItems.length} bill items for userId=$userId');
       if (!isClosed) {
         emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
       }
     } catch (e) {
+      debugPrint('SalesCubit: Error in loadSalesFromDb: $e');
       if (!isClosed) emit(SalesError('Failed to load sales items: $e'));
     }
   }
@@ -106,7 +126,9 @@ class SalesCubit extends Cubit<SalesState> {
       price: inv.price,
       quantity: quantity ?? inv.quantity,
     );
-    _items.add(billItem);
+    final list = List<BillItem>.from(_items);
+    list.add(billItem);
+    _items = list;
     // Don't insert to DB here - items will be inserted when bill is created
     if (!isClosed) {
       emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
@@ -114,13 +136,25 @@ class SalesCubit extends Cubit<SalesState> {
   }
 
   Future<void> clearItems() async {
-    _items.clear();
+    _items = <BillItem>[];
     // Don't clear DB here - only clear in-memory items
     if (!isClosed) emit(SalesUpdated([]));
   }
 
   Future<void> removeItem(BillItem item) async {
-    _items.removeWhere((i) => i.id == item.id);
+    final list = List<BillItem>.from(_items);
+    if (item.id != null) {
+      list.removeWhere((i) => i.id == item.id);
+    } else {
+      list.removeWhere((i) =>
+        i.id == null &&
+        i.name == item.name &&
+        i.price == item.price &&
+        i.quantity == item.quantity &&
+        i.serialNo == item.serialNo
+      );
+    }
+    _items = list;
     _reorderSerialsAndNames();
     if (!isClosed) {
       emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
@@ -128,10 +162,11 @@ class SalesCubit extends Cubit<SalesState> {
   }
 
   Future<void> updateItem(BillItem updatedItem) async {
-    final idx = _items.indexWhere((i) => i.id == updatedItem.id);
+    final list = List<BillItem>.from(_items);
+    final idx = list.indexWhere((i) => i.id == updatedItem.id);
     if (idx != -1) {
-      _items[idx] = updatedItem;
-      // Don't update DB here - only update in-memory item
+      list[idx] = updatedItem;
+      _items = list;
       if (!isClosed) {
         emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
       }
@@ -179,8 +214,9 @@ class SalesCubit extends Cubit<SalesState> {
   }
 
   Future<void> addBillItem(BillItem item) async {
-    // Add to in-memory list only - will be saved when bill is created
-    _items.add(item);
+    final list = List<BillItem>.from(_items);
+    list.add(item);
+    _items = list;
     if (!isClosed) {
       emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
     }
@@ -213,17 +249,43 @@ class SalesCubit extends Cubit<SalesState> {
     }
   }
 
+  Future<void> updateCartItem(BillItem oldItem, BillItem newItem) async {
+    // Match by all fields except id (for unsaved items)
+    final idx = _items.indexWhere((i) =>
+      i.id == null &&
+      i.name == oldItem.name &&
+      i.price == oldItem.price &&
+      i.quantity == oldItem.quantity &&
+      i.serialNo == oldItem.serialNo
+    );
+    if (idx != -1) {
+      _items[idx] = newItem;
+      if (!isClosed) {
+        emit(SalesUpdated(_items.where((item) => !_isSold(item)).toList()));
+      }
+    }
+  }
+
   void _reorderSerialsAndNames() {
     int serial = 1;
+    // After every operation, check if all items are default names
+    final allDefault = _items.isNotEmpty && _items.every((item) => RegExp(r'^Item \d+ ?$').hasMatch(item.name));
+    if (allDefault) {
+      // Rename all to strict sequence
+      for (var i = 0; i < _items.length; i++) {
+        _items[i] = _items[i].copyWith(
+          serialNo: serial,
+          name: 'Item $serial',
+        );
+        serial++;
+      }
+    } else {
     for (var i = 0; i < _items.length; i++) {
-      final item = _items[i];
-      // Only update name if it matches the default pattern
-      final isDefault = RegExp(r'^Item \d+ ?$').hasMatch(item.name);
-      _items[i] = item.copyWith(
+        _items[i] = _items[i].copyWith(
         serialNo: serial,
-        name: isDefault ? 'Item $serial' : item.name,
       );
       serial++;
+      }
     }
   }
 }

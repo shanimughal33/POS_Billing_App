@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -8,7 +9,13 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import '../utils/app_theme.dart';
+import '../themes/app_theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/auth_utils.dart';
+import '../utils/refresh_manager.dart';
+import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 // Dummy data model
 class Person {
@@ -46,6 +53,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
   List<String> _otherCategories = [];
   final int _tabCount = 3; // ALL, Customers, Suppliers
   final PeopleRepository _peopleRepo = PeopleRepository();
+  RefreshManager? _refreshManager;
 
   // Add filter state
   String _sortBy =
@@ -55,10 +63,11 @@ class _PeoplesScreenState extends State<PeoplesScreen>
   // Track if we need to rebuild tabs
   bool _needsTabRebuild = false;
 
-  static const TextStyle filterTextStyle = TextStyle(
-    color: Colors.black,
-    fontSize: 16,
-  );
+  // Theme-aware text style for filter dialog content
+  TextStyle _filterTextStyle(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 16);
+  }
 
   @override
   void initState() {
@@ -66,7 +75,28 @@ class _PeoplesScreenState extends State<PeoplesScreen>
     _initializeTabController();
     _filteredPeople = [];
     _tabController.addListener(_onTabChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map && args['tab'] is int) {
+        final tabIndex = args['tab'] as int;
+        if (tabIndex >= 0 && tabIndex < _tabController.length) {
+          _tabController.index = tabIndex;
+        }
+      }
+
+      // Initialize refresh manager
+      _refreshManager = Provider.of<RefreshManager>(context, listen: false);
+      _refreshManager!.addListener(_onRefreshRequested);
+    });
     _loadPeopleFromDb();
+  }
+
+  void _onRefreshRequested() {
+    if (_refreshManager != null && _refreshManager!.shouldRefreshPeople) {
+      debugPrint('PeoplesScreen: Refresh requested, reloading data');
+      _loadPeopleFromDb();
+      _refreshManager!.clearPeopleRefresh();
+    }
   }
 
   void _initializeTabController() {
@@ -90,7 +120,252 @@ class _PeoplesScreenState extends State<PeoplesScreen>
       print('Error disposing tab controller: $e');
     }
     _searchController.dispose();
+    if (_refreshManager != null) {
+      _refreshManager!.removeListener(_onRefreshRequested);
+    }
     super.dispose();
+  }
+
+  // Validate phone number
+  bool _isValidPhoneNumber(String phoneNumber) {
+    if (phoneNumber.isEmpty) return false;
+
+    // Remove all non-digit characters except +
+    final cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+
+    // Check if it's a valid phone number (at least 10 digits)
+    if (cleanNumber.startsWith('+')) {
+      return cleanNumber.length >= 12; // +91 + 10 digits
+    } else {
+      return cleanNumber.length >= 10; // At least 10 digits
+    }
+  }
+
+  // Debug method to check permissions and capabilities
+  Future<void> _debugPermissions() async {
+    try {
+      final phoneStatus = await Permission.phone.status;
+      final phoneRequest = await Permission.phone.request();
+
+      debugPrint('Phone Permission Status: $phoneStatus');
+      debugPrint('Phone Permission Request Result: $phoneRequest');
+
+      // Test URL launching capabilities
+      final testUri = Uri(scheme: 'tel', path: '1234567890');
+      final canLaunchTel = await canLaunchUrl(testUri);
+      debugPrint('Can launch tel: URLs: $canLaunchTel');
+
+      final whatsappUri = Uri.parse('https://wa.me/');
+      final canLaunchWhatsApp = await canLaunchUrl(whatsappUri);
+      debugPrint('Can launch WhatsApp URLs: $canLaunchWhatsApp');
+    } catch (e) {
+      debugPrint('Error in debug permissions: $e');
+    }
+  }
+
+  // Request phone permission
+  Future<bool> _requestPhonePermission() async {
+    try {
+      final status = await Permission.phone.request();
+      if (status.isGranted) {
+        return true;
+      } else if (status.isPermanentlyDenied) {
+        _showErrorSnackBar(
+          'Phone permission is permanently denied. Please enable it in app settings.',
+        );
+        return false;
+      } else {
+        _showErrorSnackBar('Phone permission is required to make calls');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Error requesting phone permission: $e');
+      _showErrorSnackBar('Error requesting phone permission');
+      return false;
+    }
+  }
+
+  // Call functionality with confirmation
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    if (!_isValidPhoneNumber(phoneNumber)) {
+      _showErrorSnackBar('Invalid phone number');
+      return;
+    }
+
+    // Check and request phone permission for Android 6.0+
+    if (!await _requestPhonePermission()) {
+      return;
+    }
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.green.withAlpha((0.1 * 255).toInt()),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.phone, color: Colors.green, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text('Make Call?'),
+          ],
+        ),
+        content: Text(
+          'Do you want to call ${phoneNumber}?',
+          style: TextStyle(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white
+                : Colors.black,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Colors.black,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Call'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Remove any non-digit characters except + for international numbers
+      final cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+      debugPrint('Attempting to call: $cleanNumber');
+
+      // Create tel: URL
+      final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
+      debugPrint('Phone URI: $phoneUri');
+
+      // Check if we can launch the URL
+      final canLaunch = await canLaunchUrl(phoneUri);
+      debugPrint('Can launch phone URI: $canLaunch');
+
+      if (canLaunch) {
+        final launched = await launchUrl(phoneUri);
+        debugPrint('Phone call launched successfully: $launched');
+        if (launched) {
+          _showSuccessSnackBar('Opening phone dialer...');
+        } else {
+          _showErrorSnackBar('Failed to open phone dialer');
+        }
+      } else {
+        debugPrint('Could not launch phone call for: $cleanNumber');
+        _showErrorSnackBar(
+          'Could not open phone dialer. Please check your device settings.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error making phone call: $e');
+      _showErrorSnackBar('Error opening phone dialer: ${e.toString()}');
+    }
+  }
+
+  // Check if WhatsApp is installed
+  Future<bool> _isWhatsAppInstalled() async {
+    try {
+      final Uri whatsappUri = Uri.parse('https://wa.me/');
+      return await canLaunchUrl(whatsappUri);
+    } catch (e) {
+      debugPrint('Error checking WhatsApp installation: $e');
+      return false;
+    }
+  }
+
+  // WhatsApp functionality
+  Future<void> _openWhatsApp(String phoneNumber) async {
+    if (!_isValidPhoneNumber(phoneNumber)) {
+      _showErrorSnackBar('Invalid phone number');
+      return;
+    }
+
+    // Check if WhatsApp is installed
+    if (!await _isWhatsAppInstalled()) {
+      _showErrorSnackBar('WhatsApp is not installed on your device');
+      return;
+    }
+
+    try {
+      // Remove any non-digit characters except + for international numbers
+      String cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+
+      // Remove + if present and add country code if not present
+      if (cleanNumber.startsWith('+')) {
+        cleanNumber = cleanNumber.substring(1);
+      }
+
+      // If number doesn't start with country code, assume it's Indian (+91)
+      if (!cleanNumber.startsWith('91') && cleanNumber.length == 10) {
+        cleanNumber = '91$cleanNumber';
+      }
+
+      // Create WhatsApp URL
+      final Uri whatsappUri = Uri.parse('https://wa.me/$cleanNumber');
+
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+        debugPrint('WhatsApp launched for: $cleanNumber');
+        _showSuccessSnackBar('Opening WhatsApp...');
+      } else {
+        debugPrint('Could not launch WhatsApp for: $cleanNumber');
+        _showErrorSnackBar(
+          'Could not open WhatsApp. Please make sure WhatsApp is installed.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error opening WhatsApp: $e');
+      _showErrorSnackBar('Error opening WhatsApp');
+    }
+  }
+
+  // Show success snackbar
+  void _showSuccessSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // Show error snackbar
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
   }
 
   void _onTabChanged() {
@@ -130,140 +405,139 @@ class _PeoplesScreenState extends State<PeoplesScreen>
           ),
           title: const Text('Filter & Sort'),
           content: StatefulBuilder(
-            builder: (context, setModalState) => SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.6,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Sort by:', style: filterTextStyle),
-                    RadioListTile<String>(
-                      value: 'name_asc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text('Name (A-Z)', style: filterTextStyle),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+            builder: (context, setModalState) => SizedBox(
+              width: double.maxFinite,
+              height: MediaQuery.of(context).size.height * 0.45,
+              child: ListView(
+                physics: const BouncingScrollPhysics(),
+                shrinkWrap: true,
+                children: [
+                  Text('Sort by:', style: _filterTextStyle(context)),
+                  RadioListTile<String>(
+                    value: 'name_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Name (A-Z)', style: _filterTextStyle(context)),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
                     ),
-                    RadioListTile<String>(
-                      value: 'name_desc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text('Name (Z-A)', style: filterTextStyle),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'name_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Name (Z-A)', style: _filterTextStyle(context)),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
                     ),
-                    RadioListTile<String>(
-                      value: 'balance_desc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text(
-                        'Balance (High-Low)',
-                        style: filterTextStyle,
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'balance_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text(
+                      'Balance (High-Low)',
+                      style: _filterTextStyle(context),
                     ),
-                    RadioListTile<String>(
-                      value: 'balance_asc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text(
-                        'Balance (Low-High)',
-                        style: filterTextStyle,
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
                     ),
-                    RadioListTile<String>(
-                      value: 'last_txn_desc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text(
-                        'Last Transaction (Newest)',
-                        style: filterTextStyle,
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'balance_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text(
+                      'Balance (Low-High)',
+                      style: _filterTextStyle(context),
                     ),
-                    RadioListTile<String>(
-                      value: 'last_txn_asc',
-                      groupValue: tempSortBy,
-                      onChanged: (v) => setModalState(() => tempSortBy = v!),
-                      title: const Text(
-                        'Last Transaction (Oldest)',
-                        style: filterTextStyle,
-                      ),
-                      dense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        vertical: 0,
-                        horizontal: 8,
-                      ),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
                     ),
-                    const Divider(),
-                    const Text('Balance filter:', style: filterTextStyle),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      child: DropdownButton2<String>(
-                        value: tempBalanceFilter,
-                        isExpanded: true,
-                        style: filterTextStyle,
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'all',
-                            child: Text('All', style: filterTextStyle),
+                  ),
+                  RadioListTile<String>(
+                    value: 'last_txn_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text(
+                      'Last Transaction (Newest)',
+                      style: _filterTextStyle(context),
+                    ),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
+                    ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'last_txn_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text(
+                      'Last Transaction (Oldest)',
+                      style: _filterTextStyle(context),
+                    ),
+                    dense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 0,
+                      horizontal: 8,
+                    ),
+                  ),
+                  const Divider(),
+                  Text('Balance filter:', style: _filterTextStyle(context)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: DropdownButton2<String>(
+                      value: tempBalanceFilter,
+                      isExpanded: true,
+                      style: _filterTextStyle(context),
+                      items: [
+                        DropdownMenuItem(
+                          value: 'all',
+                          child: Text('All', style: _filterTextStyle(context)),
+                        ),
+                        DropdownMenuItem(
+                          value: 'positive',
+                          child: Text(
+                            'Positive (> 0)',
+                            style: _filterTextStyle(context),
                           ),
-                          DropdownMenuItem(
-                            value: 'positive',
-                            child: Text(
-                              'Positive (> 0)',
-                              style: filterTextStyle,
-                            ),
+                        ),
+                        DropdownMenuItem(
+                          value: 'negative',
+                          child: Text(
+                            'Negative (< 0)',
+                            style: _filterTextStyle(context),
                           ),
-                          DropdownMenuItem(
-                            value: 'negative',
-                            child: Text(
-                              'Negative (< 0)',
-                              style: filterTextStyle,
-                            ),
-                          ),
-                          DropdownMenuItem(
-                            value: 'zero',
-                            child: Text('Zero', style: filterTextStyle),
-                          ),
-                        ],
-                        onChanged: (v) =>
-                            setModalState(() => tempBalanceFilter = v!),
-                      ),
+                        ),
+                        DropdownMenuItem(
+                          value: 'zero',
+                          child: Text('Zero', style: _filterTextStyle(context)),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          setModalState(() => tempBalanceFilter = v!),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
+              style: AppTheme.getStandardCancelButtonStyle(context),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -380,8 +654,16 @@ class _PeoplesScreenState extends State<PeoplesScreen>
   Future<void> _loadPeopleFromDb() async {
     try {
       if (!mounted) return;
-
-      final people = await _peopleRepo.getAllPeople();
+      final uid = await getCurrentUserUid();
+      debugPrint('PeoplesScreen: _loadPeopleFromDb fetched UID: $uid');
+      if (uid == null || uid.isEmpty) {
+        setState(() {
+          _allPeople = [];
+          _otherCategories = [];
+        });
+        return;
+      }
+      final people = await _peopleRepo.getAllPeople(uid);
 
       // Extract unique custom categories from DB
       final customCats = people
@@ -521,7 +803,10 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
+                      backgroundColor:
+                          Theme.of(context).brightness == Brightness.dark
+                          ? Colors.black
+                          : Colors.white,
                       child: Container(
                         constraints: BoxConstraints(
                           maxHeight: maxHeight > 350 ? 350 : maxHeight,
@@ -631,7 +916,7 @@ class _PeoplesScreenState extends State<PeoplesScreen>
           child: Container(
             margin: const EdgeInsets.only(top: 48),
             decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark ? Colors.black : Colors.white,
+              color: AppTheme.getCardColor(context),
               borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
               boxShadow: [
                 BoxShadow(
@@ -781,290 +1066,317 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              foregroundColor:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white
+                                  : Color(0xFF1976D2),
+                            ),
                             child: Text(
                               'Cancel',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1976D2),
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ),
                           const SizedBox(width: 12),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Color(0xFF1976D2),
-                              textStyle: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                          Container(
+                            decoration: AppTheme.getGradientDecoration(),
+                            child: ElevatedButton(
+                              style: AppTheme.getGradientSaveButtonStyle(
+                                context,
                               ),
-                              side: BorderSide.none,
-                            ),
-                            onPressed: () async {
-                              // Disable button to prevent multiple presses
-                              if (!mounted) return;
 
-                              try {
-                                String typeToUse = selectedType;
-
-                                // Handle custom category creation
-                                if (showOtherInput &&
-                                    newCategoryController.text
-                                        .trim()
-                                        .isNotEmpty) {
-                                  typeToUse = newCategoryController.text
-                                      .trim()
-                                      .toLowerCase();
-
-                                  // Validate custom category name
-                                  if (typeToUse.isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Please enter a valid category name',
-                                        ),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                    return;
-                                  }
-
-                                  if (typeToUse == 'customer' ||
-                                      typeToUse == 'supplier') {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Category name cannot be "customer" or "supplier"',
-                                        ),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                    return;
-                                  }
-
-                                  if (_otherCategories.contains(typeToUse)) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Category "$typeToUse" already exists',
-                                        ),
-                                        backgroundColor: Colors.red,
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                }
-
-                                // Validate form
-                                if (!formKey.currentState!.validate()) {
-                                  return;
-                                }
-
-                                // Show loading indicator
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Saving...'),
-                                    duration: Duration(seconds: 1),
-                                  ),
-                                );
-
-                                if (isEdit) {
-                                  // Update existing person
-                                  final updatedPerson = People(
-                                    id: person!.id,
-                                    name: nameController.text.trim(),
-                                    phone: phoneController.text.trim(),
-                                    category: typeToUse,
-                                    balance:
-                                        double.tryParse(
-                                          balanceController.text.trim(),
-                                        ) ??
-                                        0,
-                                    lastTransactionDate: DateTime.now(),
-                                    notes:
-                                        notesController.text.trim().isNotEmpty
-                                        ? notesController.text.trim()
-                                        : null,
-                                  );
-
-                                  await _peopleRepo.updatePerson(updatedPerson);
-                                  await ActivityRepository().logActivity(
-                                    Activity(
-                                      type: 'people_edit',
-                                      description:
-                                          'Edited person: ${nameController.text.trim()} (${phoneController.text.trim()})',
-                                      timestamp: DateTime.now(),
-                                      metadata: {
-                                        'id': person!.id,
-                                        'name': nameController.text.trim(),
-                                        'phone': phoneController.text.trim(),
-                                        'category': typeToUse,
-                                        'balance': balanceController.text
-                                            .trim(),
-                                      },
-                                    ),
-                                  );
-                                  await _loadPeopleFromDb();
-
-                                  if (mounted) {
-                                    Navigator.pop(context);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Person updated successfully',
-                                        ),
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    );
-                                  }
-                                } else {
-                                  // Create new person
-                                  final newPerson = People(
-                                    name: nameController.text.trim(),
-                                    phone: phoneController.text.trim(),
-                                    category: typeToUse,
-                                    balance:
-                                        double.tryParse(
-                                          balanceController.text.trim(),
-                                        ) ??
-                                        0,
-                                    lastTransactionDate: DateTime.now(),
-                                    notes:
-                                        notesController.text.trim().isNotEmpty
-                                        ? notesController.text.trim()
-                                        : null,
-                                  );
-
-                                  final id = await _peopleRepo.insertPerson(
-                                    newPerson,
-                                  );
-
-                                  if (id > 0) {
-                                    // Add new category to list if it's custom
-                                    if (showOtherInput &&
-                                        newCategoryController.text
-                                            .trim()
-                                            .isNotEmpty) {
-                                      final newCategory = newCategoryController
-                                          .text
-                                          .trim()
-                                          .toLowerCase();
-                                      if (!_otherCategories.contains(
-                                        newCategory,
-                                      )) {
-                                        setState(() {
-                                          _otherCategories.add(newCategory);
-                                          _needsTabRebuild = true;
-                                        });
+                              // Refactored People Save Button without async/await for offline-first approach
+                              onPressed: () {
+                                if (!mounted) return;
+                                getCurrentUserUid()
+                                    .then((uid) {
+                                      debugPrint(
+                                        'PeoplesScreen: Save/Add pressed, fetched UID: \$uid',
+                                      );
+                                      if (uid == null || uid.isEmpty) {
+                                        debugPrint(
+                                          'PeoplesScreen: ERROR: UID is null or empty!',
+                                        );
+                                        return;
                                       }
-                                    }
 
-                                    // Reload data
-                                    await _loadPeopleFromDb();
+                                      String typeToUse = selectedType;
 
-                                    // Log activity for adding a person (ensure this is always called)
-                                    try {
-                                      await ActivityRepository().logActivity(
-                                        Activity(
-                                          type: 'people_add',
-                                          description:
-                                              'Added person: ${nameController.text.trim()} (${phoneController.text.trim()})',
-                                          timestamp: DateTime.now(),
-                                          metadata: {
-                                            'id': id, // Use the returned id
-                                            'name': nameController.text.trim(),
-                                            'phone': phoneController.text
-                                                .trim(),
-                                            'category': typeToUse,
-                                            'balance': balanceController.text
-                                                .trim(),
-                                          },
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      print(
-                                        'Error logging add person activity: ${e.toString()}',
-                                      );
-                                    }
-
-                                    if (mounted) {
-                                      Navigator.pop(context);
-
-                                      // Switch to new category tab if it's custom
                                       if (showOtherInput &&
                                           newCategoryController.text
                                               .trim()
                                               .isNotEmpty) {
-                                        final newCategory =
-                                            newCategoryController.text
-                                                .trim()
-                                                .toLowerCase();
-                                        WidgetsBinding.instance
-                                            .addPostFrameCallback((_) {
-                                              if (mounted) {
-                                                try {
-                                                  final newCategoryIndex =
-                                                      _otherCategories.indexOf(
-                                                        newCategory,
-                                                      ) +
-                                                      3;
-                                                  if (newCategoryIndex >= 3 &&
-                                                      newCategoryIndex <
-                                                          _tabController
-                                                              .length) {
-                                                    _tabController.animateTo(
-                                                      newCategoryIndex,
-                                                    );
-                                                  }
-                                                } catch (e) {
-                                                  print(
-                                                    'Error switching to new category tab: $e',
-                                                  );
-                                                }
-                                              }
-                                            });
+                                        typeToUse = newCategoryController.text
+                                            .trim()
+                                            .toLowerCase();
+
+                                        if (typeToUse.isEmpty ||
+                                            typeToUse == 'customer' ||
+                                            typeToUse == 'supplier') {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                typeToUse.isEmpty
+                                                    ? 'Please enter a valid category name'
+                                                    : 'Category name cannot be "customer" or "supplier"',
+                                              ),
+                                              backgroundColor: Colors.red,
+                                            ),
+                                          );
+                                          return;
+                                        }
+
+                                        if (_otherCategories.contains(
+                                          typeToUse,
+                                        )) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Category "\$typeToUse" already exists',
+                                              ),
+                                              backgroundColor: Colors.red,
+                                            ),
+                                          );
+                                          return;
+                                        }
                                       }
+
+                                      if (!formKey.currentState!.validate())
+                                        return;
 
                                       ScaffoldMessenger.of(
                                         context,
                                       ).showSnackBar(
                                         const SnackBar(
-                                          content: Text(
-                                            'Person added successfully',
-                                          ),
-                                          backgroundColor: Colors.green,
+                                          content: Text('Saving...'),
+                                          duration: Duration(seconds: 1),
                                         ),
                                       );
-                                    }
-                                  } else {
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Failed to save person',
+
+                                      if (isEdit) {
+                                        final updatedPerson = People(
+                                          id: person!.id,
+                                          userId: uid,
+                                          name: nameController.text.trim(),
+                                          phone: phoneController.text.trim(),
+                                          category: typeToUse,
+                                          balance:
+                                              double.tryParse(
+                                                balanceController.text.trim(),
+                                              ) ??
+                                              0,
+                                          lastTransactionDate: DateTime.now(),
+                                          notes:
+                                              notesController.text
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? notesController.text.trim()
+                                              : null,
+                                        );
+
+                                        _peopleRepo.updatePerson(updatedPerson).then((
+                                          _,
+                                        ) {
+                                          ActivityRepository().logActivity(
+                                            Activity(
+                                              userId: uid,
+                                              type: 'people_edit',
+                                              description:
+                                                  'Edited person: ${updatedPerson.name} (${updatedPerson.phone})',
+                                              timestamp: DateTime.now(),
+                                              metadata: {
+                                                'id': updatedPerson.id,
+                                                'name': updatedPerson.name,
+                                                'phone': updatedPerson.phone,
+                                                'category':
+                                                    updatedPerson.category,
+                                                'balance': updatedPerson.balance
+                                                    .toString(),
+                                              },
+                                            ),
+                                          );
+                                          _loadPeopleFromDb();
+                                          if (mounted) {
+                                            Navigator.pop(context);
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Person updated successfully',
+                                                ),
+                                                backgroundColor: Colors.green,
+                                              ),
+                                            );
+                                          }
+                                        });
+                                      } else {
+                                        final newPerson = People(
+                                          userId: uid,
+                                          name: nameController.text.trim(),
+                                          phone: phoneController.text.trim(),
+                                          category: typeToUse,
+                                          balance:
+                                              double.tryParse(
+                                                balanceController.text.trim(),
+                                              ) ??
+                                              0,
+                                          lastTransactionDate: DateTime.now(),
+                                          notes:
+                                              notesController.text
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? notesController.text.trim()
+                                              : null,
+                                        );
+
+                                        _peopleRepo.insertPerson(newPerson).then((
+                                          id,
+                                        ) {
+                                          RefreshManager().refreshPeople();
+                                          RefreshManager().refreshDashboard();
+
+                                          if (id.isNotEmpty) {
+                                            if (showOtherInput &&
+                                                newCategoryController.text
+                                                    .trim()
+                                                    .isNotEmpty) {
+                                              final newCategory =
+                                                  newCategoryController.text
+                                                      .trim()
+                                                      .toLowerCase();
+                                              if (!_otherCategories.contains(
+                                                newCategory,
+                                              )) {
+                                                setState(() {
+                                                  _otherCategories.add(
+                                                    newCategory,
+                                                  );
+                                                  _needsTabRebuild = true;
+                                                });
+                                              }
+                                            }
+
+                                            _loadPeopleFromDb();
+
+                                            SharedPreferences.getInstance().then((
+                                              prefs,
+                                            ) {
+                                              final userId =
+                                                  prefs.getString(
+                                                    'current_uid',
+                                                  ) ??
+                                                  '';
+                                              ActivityRepository().logActivity(
+                                                Activity(
+                                                  userId: userId,
+                                                  type: 'people_add',
+                                                  description:
+                                                      'Added person: ${newPerson.name} (${newPerson.phone})',
+                                                  timestamp: DateTime.now(),
+                                                  metadata: {
+                                                    'id': id,
+                                                    'name': newPerson.name,
+                                                    'phone': newPerson.phone,
+                                                    'category':
+                                                        newPerson.category,
+                                                    'balance': newPerson.balance
+                                                        .toString(),
+                                                  },
+                                                ),
+                                              );
+                                            });
+
+                                            if (mounted) {
+                                              Navigator.pop(context);
+                                              if (showOtherInput &&
+                                                  newCategoryController.text
+                                                      .trim()
+                                                      .isNotEmpty) {
+                                                final newCategory =
+                                                    newCategoryController.text
+                                                        .trim()
+                                                        .toLowerCase();
+                                                WidgetsBinding.instance
+                                                    .addPostFrameCallback((_) {
+                                                      if (mounted) {
+                                                        try {
+                                                          final newCategoryIndex =
+                                                              _otherCategories
+                                                                  .indexOf(
+                                                                    newCategory,
+                                                                  ) +
+                                                              3;
+                                                          if (newCategoryIndex >=
+                                                                  3 &&
+                                                              newCategoryIndex <
+                                                                  _tabController
+                                                                      .length) {
+                                                            _tabController
+                                                                .animateTo(
+                                                                  newCategoryIndex,
+                                                                );
+                                                          }
+                                                        } catch (e) {
+                                                          print(
+                                                            'Error switching to new category tab: \$e',
+                                                          );
+                                                        }
+                                                      }
+                                                    });
+                                              }
+
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Person added successfully',
+                                                  ),
+                                                  backgroundColor: Colors.green,
+                                                ),
+                                              );
+                                            }
+                                          } else {
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Failed to save person',
+                                                  ),
+                                                  backgroundColor: Colors.red,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        });
+                                      }
+                                    })
+                                    .catchError((e) {
+                                      print('Error in save operation: \$e');
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Error saving person: \$e',
+                                            ),
+                                            backgroundColor: Colors.red,
                                           ),
-                                          backgroundColor: Colors.red,
-                                        ),
-                                      );
-                                    }
-                                  }
-                                }
-                              } catch (e) {
-                                print('Error in save operation: $e');
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Error saving person: $e'),
-                                      backgroundColor: Colors.red,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                            child: Text(
-                              isEdit ? 'Save' : 'Add',
-                              style: const TextStyle(color: Color(0xFF1976D2)),
+                                        );
+                                      }
+                                    });
+                              },
+
+                              child: Text(isEdit ? 'Save' : 'Add'),
                             ),
                           ),
                         ],
@@ -1081,9 +1393,16 @@ class _PeoplesScreenState extends State<PeoplesScreen>
   }
 
   void _deletePerson(People person) async {
-    await _peopleRepo.deletePerson(person.id!);
+    final uid = await getCurrentUserUid();
+    debugPrint('PeoplesScreen: _deletePerson fetched UID: $uid');
+    if (uid == null || uid.isEmpty) return;
+    await _peopleRepo.deletePerson(person.id! as String, uid);
+
+    // Trigger refresh for all screens
+    RefreshManager().refreshPeople();
     await ActivityRepository().logActivity(
       Activity(
+        userId: uid,
         type: 'people_delete',
         description: 'Deleted person: ${person.name} (${person.phone})',
         timestamp: DateTime.now(),
@@ -1157,19 +1476,29 @@ class _PeoplesScreenState extends State<PeoplesScreen>
       return DefaultTabController(
         length: tabLength,
         child: Scaffold(
-          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0A2342)
+              : Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF1A2233)
+                : Colors.white,
             centerTitle: true,
             title: Text(
               'People',
               style: TextStyle(
-                color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342),
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : Color(0xFF0A2342),
                 fontWeight: FontWeight.bold,
                 fontSize: 22,
               ),
             ),
-            iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Color(0xFF0A2342)),
+            iconTheme: IconThemeData(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : Color(0xFF0A2342),
+            ),
             elevation: 0,
             shape: const RoundedRectangleBorder(
               borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
@@ -1190,8 +1519,13 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                         color: Color(0xFF1976D2),
                       ),
                     ),
-                    labelColor: Color(0xFF1976D2),
-                    unselectedLabelColor: Color(0xFF1976D2),
+                    labelColor: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : Color(0xFF1976D2),
+                    unselectedLabelColor:
+                        Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.7)
+                        : Color(0xFF1976D2),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -1210,15 +1544,25 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                             children: [
                               Text(
                                 entry.value.capitalize(),
-                                style: TextStyle(color: Color(0xFF1976D2)),
+                                style: TextStyle(
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Color(0xFF1976D2),
+                                ),
                               ),
                               const SizedBox(width: 4),
                               GestureDetector(
                                 onTap: () => _deleteOtherCategory(entry.key),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.close,
                                   size: 16,
-                                  color: Color(0xFF1976D2),
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Color(0xFF1976D2),
                                 ),
                               ),
                             ],
@@ -1338,33 +1682,54 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                   horizontal: 16,
                   vertical: 8,
                 ),
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (val) {
-                    setState(() {
-                      _searchQuery = val;
-                      _filterPeople();
-                    });
-                  },
-                  decoration: InputDecoration(
-                    hintText: 'Search by name or phone...',
-                    prefixIcon: Icon(Icons.search, color: accentGreen),
-                    suffixIcon: IconButton(
-                      icon: Icon(Icons.filter_alt, color: accentGreen),
-                      tooltip: 'Filter & Sort',
-                      onPressed: _showFilterDialog,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (val) {
+                          setState(() {
+                            _searchQuery = val;
+                            _filterPeople();
+                          });
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search by name or phone...',
+                          prefixIcon: Icon(Icons.search, color: accentGreen),
+                          filled: true,
+                          fillColor: Theme.of(context).cardColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 0,
+                          ),
+                        ),
+                      ),
                     ),
-                    filled: true,
-                    fillColor: Theme.of(context).cardColor,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF0A2342),
+                            Color(0xFF123060),
+                            Color(0xFF1976D2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.filter_alt, color: Colors.white),
+                        onPressed: _showFilterDialog,
+                        tooltip: 'Filter & Sort',
+                      ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 0,
-                    ),
-                  ),
+                  ],
                 ),
               ),
               Expanded(
@@ -1372,7 +1737,10 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                     ? Center(
                         child: Text(
                           'No Peoples Found',
-                          style: TextStyle(color: Theme.of(context).textTheme.bodySmall?.color, fontSize: 16),
+                          style: TextStyle(
+                            color: Theme.of(context).textTheme.bodySmall?.color,
+                            fontSize: 16,
+                          ),
                         ),
                       )
                     : ListView.builder(
@@ -1393,16 +1761,92 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                   horizontal: 20,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.errorContainer,
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? const Color(0xFFDC3545)
+                                      : Colors.red.shade100,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Icon(
                                   Icons.delete,
-                                  color: Theme.of(context).colorScheme.error,
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Colors.red,
                                   size: 32,
                                 ),
                               ),
+                              confirmDismiss: (direction) async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.withAlpha(
+                                              (0.1 * 255).toInt(),
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.warning_rounded,
+                                            color: Colors.red,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        const Text('Delete Person?'),
+                                      ],
+                                    ),
+                                    content: Text(
+                                      'Are you sure you want to delete "${person.name}"? This action cannot be undone.',
+                                      style: TextStyle(
+                                        color:
+                                            Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? Colors.white
+                                            : Colors.black,
+                                      ),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: Text(
+                                          'Cancel',
+                                          style: TextStyle(
+                                            color:
+                                                Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white
+                                                : Colors.black,
+                                          ),
+                                        ),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                return confirmed;
+                              },
                               onDismissed: (direction) {
+                                setState(() {
+                                  _filteredPeople.removeAt(idx);
+                                });
                                 _deletePerson(person);
                               },
                               child: Card(
@@ -1423,12 +1867,16 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                       minHeight: 72,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).brightness == Brightness.dark ? Color(0xFF232A36) : Colors.white,
+                                      color:
+                                          Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? const Color(0xFF013A63)
+                                          : Colors.white,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Row(
                                       crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                          CrossAxisAlignment.center,
                                       children: [
                                         CircleAvatar(
                                           backgroundColor: Color(
@@ -1451,9 +1899,16 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                             children: [
                                               Text(
                                                 person.name,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 16,
+                                                  color:
+                                                      Theme.of(
+                                                            context,
+                                                          ).brightness ==
+                                                          Brightness.dark
+                                                      ? Colors.white
+                                                      : Colors.black,
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
@@ -1463,7 +1918,17 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                 person.phone,
                                                 style: TextStyle(
                                                   fontSize: 13,
-                                                  color: Theme.of(context).textTheme.bodyMedium?.color,
+                                                  color:
+                                                      Theme.of(
+                                                            context,
+                                                          ).brightness ==
+                                                          Brightness.dark
+                                                      ? Colors.white
+                                                            .withOpacity(0.8)
+                                                      : Theme.of(context)
+                                                            .textTheme
+                                                            .bodyMedium
+                                                            ?.color,
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
@@ -1475,7 +1940,19 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                     'Balance: ',
                                                     style: TextStyle(
                                                       fontSize: 13,
-                                                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                                                      color:
+                                                          Theme.of(
+                                                                context,
+                                                              ).brightness ==
+                                                              Brightness.dark
+                                                          ? Colors.white
+                                                                .withOpacity(
+                                                                  0.8,
+                                                                )
+                                                          : Theme.of(context)
+                                                                .textTheme
+                                                                .bodyMedium
+                                                                ?.color,
                                                     ),
                                                   ),
                                                   Text(
@@ -1483,31 +1960,48 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                                     style: TextStyle(
                                                       fontSize: 13,
                                                       color: person.balance < 0
-                                                          ? Theme.of(context).colorScheme.error
-                                                          : Theme.of(context).colorScheme.primary,
+                                                          ? Colors.red
+                                                          : Theme.of(
+                                                                  context,
+                                                                ).brightness ==
+                                                                Brightness.dark
+                                                          ? Colors.white
+                                                          : Theme.of(context)
+                                                                .colorScheme
+                                                                .primary,
                                                       fontWeight:
                                                           FontWeight.bold,
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 8),
-                                                  Flexible(
-                                                    child: Text(
-                                                      DateFormat(
-                                                        'dd MMM, yyyy',
-                                                      ).format(
-                                                        person
-                                                            .lastTransactionDate,
-                                                      ),
-                                                      style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: Theme.of(context).textTheme.bodySmall?.color,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
                                                 ],
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Container(
+                                                alignment: Alignment.bottomLeft,
+                                                child: Text(
+                                                  DateFormat(
+                                                    'dd MMM, yyyy',
+                                                  ).format(
+                                                    person.lastTransactionDate,
+                                                  ),
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                              .withOpacity(0.6)
+                                                        : Theme.of(context)
+                                                              .textTheme
+                                                              .bodySmall
+                                                              ?.color,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -1521,189 +2015,205 @@ class _PeoplesScreenState extends State<PeoplesScreen>
                                             mainAxisAlignment:
                                                 MainAxisAlignment.end,
                                             children: [
-                                              IconButton(
-                                                icon: const Icon(
-                                                  Icons.receipt_long,
-                                                  color: Color(0xFF1976D2),
-                                                  size: 20,
-                                                ),
-                                                onPressed: () {},
-                                                tooltip: 'Ledger',
-                                              ),
-                                              PopupMenuButton<String>(
-                                                icon: Icon(
-                                                  Icons.more_vert,
-                                                  color: Theme.of(context).textTheme.bodySmall?.color,
-                                                  size: 22,
-                                                ),
-                                                onSelected: (value) {
-                                                  if (value == 'call') {
-                                                    // Implement call logic here
-                                                  } else if (value ==
-                                                      'whatsapp') {
-                                                    // Implement WhatsApp logic here
-                                                  } else if (value ==
-                                                      'details') {
-                                                    showDialog(
-                                                      context: context,
-                                                      builder: (ctx) => AlertDialog(
-                                                        shape: RoundedRectangleBorder(
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                18,
-                                                              ),
-                                                        ),
-                                                        content: SizedBox(
-                                                          height:
-                                                              MediaQuery.of(
+                                              Container(
+                                                alignment: Alignment.center,
+                                                child: PopupMenuButton<String>(
+                                                  icon: Icon(
+                                                    Icons.more_vert,
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Theme.of(context)
+                                                              .textTheme
+                                                              .bodySmall
+                                                              ?.color,
+                                                    size: 22,
+                                                  ),
+                                                  onSelected: (value) {
+                                                    if (value == 'call') {
+                                                      _makePhoneCall(
+                                                        person.phone,
+                                                      );
+                                                    } else if (value ==
+                                                        'whatsapp') {
+                                                      _openWhatsApp(
+                                                        person.phone,
+                                                      );
+                                                    } else if (value ==
+                                                        'details') {
+                                                      showDialog(
+                                                        context: context,
+                                                        builder: (ctx) => AlertDialog(
+                                                          shape: RoundedRectangleBorder(
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  18,
+                                                                ),
+                                                          ),
+                                                          content: SizedBox(
+                                                            height:
+                                                                MediaQuery.of(
+                                                                          context,
+                                                                        ).size.height *
+                                                                        0.5 >
+                                                                    300
+                                                                ? 300
+                                                                : MediaQuery.of(
                                                                         context,
                                                                       ).size.height *
-                                                                      0.5 >
-                                                                  300
-                                                              ? 300
-                                                              : MediaQuery.of(
-                                                                      context,
-                                                                    ).size.height *
-                                                                    0.5,
-                                                          child: Scrollbar(
-                                                            thumbVisibility:
-                                                                true,
-                                                            child: SingleChildScrollView(
-                                                              padding:
-                                                                  EdgeInsets.all(
-                                                                    18,
-                                                                  ),
-                                                              child: Column(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Text(
-                                                                    'Description:',
-                                                                    style: TextStyle(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      color: Color(
-                                                                        0xFF128C7E,
+                                                                      0.5,
+                                                            child: Scrollbar(
+                                                              thumbVisibility:
+                                                                  true,
+                                                              child: SingleChildScrollView(
+                                                                padding:
+                                                                    EdgeInsets.all(
+                                                                      18,
+                                                                    ),
+                                                                child: Column(
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
+                                                                  children: [
+                                                                    Text(
+                                                                      'Description:',
+                                                                      style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
+                                                                        color: Color(
+                                                                          0xFF128C7E,
+                                                                        ),
                                                                       ),
                                                                     ),
-                                                                  ),
-                                                                  SizedBox(
-                                                                    height: 6,
-                                                                  ),
-                                                                  Text(
-                                                                    person.description ??
-                                                                        'No description',
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          15,
+                                                                    SizedBox(
+                                                                      height: 6,
                                                                     ),
-                                                                  ),
-                                                                  SizedBox(
-                                                                    height: 14,
-                                                                  ),
-                                                                  Text(
-                                                                    'Notes:',
-                                                                    style: TextStyle(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold,
-                                                                      color: Color(
-                                                                        0xFF128C7E,
+                                                                    Text(
+                                                                      person.description ??
+                                                                          'No description',
+                                                                      style: TextStyle(
+                                                                        fontSize:
+                                                                            15,
                                                                       ),
                                                                     ),
-                                                                  ),
-                                                                  SizedBox(
-                                                                    height: 6,
-                                                                  ),
-                                                                  Text(
-                                                                    person.notes ??
-                                                                        'No notes',
-                                                                    style: TextStyle(
-                                                                      fontSize:
-                                                                          15,
+                                                                    SizedBox(
+                                                                      height:
+                                                                          14,
                                                                     ),
-                                                                  ),
-                                                                ],
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        actions: [
-                                                          TextButton(
-                                                            onPressed: () =>
-                                                                Navigator.pop(
-                                                                  ctx,
+                                                                    Text(
+                                                                      'Notes:',
+                                                                      style: TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
+                                                                        color: Color(
+                                                                          0xFF128C7E,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                    SizedBox(
+                                                                      height: 6,
+                                                                    ),
+                                                                    Text(
+                                                                      person.notes ??
+                                                                          'No notes',
+                                                                      style: TextStyle(
+                                                                        fontSize:
+                                                                            15,
+                                                                      ),
+                                                                    ),
+                                                                  ],
                                                                 ),
-                                                            child: Text(
-                                                              'Close',
-                                                              style: TextStyle(
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
                                                               ),
                                                             ),
                                                           ),
+                                                          actions: [
+                                                            TextButton(
+                                                              onPressed: () =>
+                                                                  Navigator.pop(
+                                                                    ctx,
+                                                                  ),
+                                                              child: Text(
+                                                                'Close',
+                                                                style: TextStyle(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                    }
+                                                  },
+                                                  itemBuilder: (context) => [
+                                                    PopupMenuItem(
+                                                      value: 'details',
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.info_outline,
+                                                            color: Color(
+                                                              0xFF128C7E,
+                                                            ),
+                                                            size: 18,
+                                                          ),
+                                                          SizedBox(width: 8),
+                                                          Text('Details'),
                                                         ],
                                                       ),
-                                                    );
-                                                  }
-                                                },
-                                                itemBuilder: (context) => [
-                                                  PopupMenuItem(
-                                                    value: 'details',
-                                                    child: Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.info_outline,
-                                                          color: Color(
-                                                            0xFF128C7E,
+                                                    ),
+                                                    PopupMenuItem(
+                                                      value: 'call',
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.call,
+                                                            color:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .primary,
+                                                            size: 18,
                                                           ),
-                                                          size: 18,
-                                                        ),
-                                                        SizedBox(width: 8),
-                                                        Text('Details'),
-                                                      ],
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          Text('Call'),
+                                                        ],
+                                                      ),
                                                     ),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 'call',
-                                                    child: Row(
-                                                      children: [
-                                                        Icon(
-                                                          Icons.call,
-                                                          color: Theme.of(context).colorScheme.primary,
-                                                          size: 18,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 8,
-                                                        ),
-                                                        Text('Call'),
-                                                      ],
+                                                    PopupMenuItem(
+                                                      value: 'whatsapp',
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            FontAwesomeIcons
+                                                                .whatsapp,
+                                                            color:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .primary,
+                                                            size: 18,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          Text('WhatsApp'),
+                                                        ],
+                                                      ),
                                                     ),
-                                                  ),
-                                                  PopupMenuItem(
-                                                    value: 'whatsapp',
-                                                    child: Row(
-                                                      children: [
-                                                        Icon(
-                                                          FontAwesomeIcons
-                                                              .whatsapp,
-                                                          color: Theme.of(context).colorScheme.primary,
-                                                          size: 18,
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 8,
-                                                        ),
-                                                        Text('WhatsApp'),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
+                                                  ],
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -1783,43 +2293,21 @@ Widget _buildAttractiveTextField(
   VoidCallback? onSuffixIconTap,
   ValueChanged<String>? onChanged,
 }) {
-  final isDark = Theme.of(context).brightness == Brightness.dark;
-  final mainColor = isDark ? Colors.white : Color(0xFF1976D2);
-  final veryLightBlue = isDark ? Color(0xFF90CAF9) : Color(0xFFB3D8FD);
   return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
+    controller: controller,
+    keyboardType: keyboardType,
+    maxLines: maxLines,
     validator: validator,
-      onTap: onTap,
-      onChanged: onChanged,
-    style: TextStyle(color: mainColor),
-      decoration: InputDecoration(
-        labelText: label,
-      labelStyle: TextStyle(color: mainColor, fontWeight: FontWeight.w600),
+    onTap: onTap,
+    onChanged: onChanged,
+    style: TextStyle(color: AppTheme.getTextColor(context)),
+    decoration: AppTheme.getStandardInputDecoration(
+      context,
+      labelText: label,
       hintText: label,
-      hintStyle: TextStyle(color: veryLightBlue),
-      prefixIcon: Icon(icon, color: mainColor),
-        suffixIcon: suffixIcon != null
-            ? GestureDetector(
-                onTap: onSuffixIconTap,
-              child: Icon(suffixIcon, color: mainColor),
-              )
-            : null,
-      filled: true,
-      fillColor: isDark ? Colors.black : Colors.white,
-        border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: veryLightBlue),
-        ),
-        enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: veryLightBlue),
-        ),
-        focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: veryLightBlue, width: 2),
-      ),
+      prefixIcon: icon,
+      suffixIcon: suffixIcon,
+      onSuffixIconTap: onSuffixIconTap,
     ),
   );
 }
@@ -1833,32 +2321,30 @@ Widget _buildAttractiveDropdown(
   void Function(String?) onChanged, {
   String Function(String)? getDisplayName,
 }) {
-  final isDark = Theme.of(context).brightness == Brightness.dark;
-  final mainColor = isDark ? Colors.white : Color(0xFF1976D2);
   return Material(
     elevation: 1.0,
-    borderRadius: BorderRadius.circular(10),
-    shadowColor: Theme.of(context).shadowColor,
+    borderRadius: BorderRadius.circular(12),
+    shadowColor: AppTheme.getShadowColor(context),
     child: Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: isDark ? Colors.black : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.getBackgroundColor(context),
       ),
       child: DropdownButtonFormField2<String>(
         value: value,
         isExpanded: true,
         style: TextStyle(
           fontSize: 14,
-          color: mainColor,
+          color: AppTheme.getTextColor(context),
           fontWeight: FontWeight.w500,
         ),
         dropdownStyleData: DropdownStyleData(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: isDark ? Colors.black : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            color: AppTheme.getBackgroundColor(context),
             boxShadow: [
               BoxShadow(
-                color: mainColor.withAlpha((0.1 * 255).toInt()),
+                color: AppTheme.getShadowColor(context),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -1866,39 +2352,22 @@ Widget _buildAttractiveDropdown(
           ),
           offset: const Offset(0, -4),
         ),
-        decoration: InputDecoration(
+        decoration: AppTheme.getStandardInputDecoration(
+          context,
           labelText: label,
-          labelStyle: TextStyle(
-            color: mainColor,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-          prefixIcon: Icon(icon, color: mainColor, size: 20),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: mainColor),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: mainColor),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: mainColor, width: 1.5),
-          ),
-          filled: true,
-          fillColor: isDark ? Colors.black : Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 12,
-            horizontal: 12,
-          ),
+          hintText: label,
+          prefixIcon: icon,
+          isDropdown: true,
         ),
         items: items.map((item) {
           return DropdownMenuItem<String>(
             value: item,
             child: Text(
               getDisplayName?.call(item) ?? item,
-              style: TextStyle(fontSize: 14, color: mainColor),
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.getTextColor(context),
+              ),
             ),
           );
         }).toList(),

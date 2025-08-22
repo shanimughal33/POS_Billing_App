@@ -1,14 +1,22 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'package:flutter/material.dart';
+import 'package:forward_billing_app/providers/dashboard_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/expense.dart';
 import '../repositories/expense_repository.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import '../utils/app_theme.dart';
+import '../themes/app_theme.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/auth_utils.dart';
+import '../utils/refresh_manager.dart';
+import 'home_screen.dart';
+import 'package:flutter/foundation.dart';
+import 'login_screen.dart' as login;
 
 class ExpenseScreen extends StatefulWidget {
   const ExpenseScreen({super.key});
@@ -87,68 +95,75 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text('Filter & Sort'),
+          title: Text('Filter & Sort'),
           content: StatefulBuilder(
-            builder: (context, setModalState) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Sort by:'),
-                RadioListTile<String>(
-                  value: 'date_desc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Date (Newest)'),
-                ),
-                RadioListTile<String>(
-                  value: 'date_asc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Date (Oldest)'),
-                ),
-                RadioListTile<String>(
-                  value: 'amount_desc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Amount (High-Low)'),
-                ),
-                RadioListTile<String>(
-                  value: 'amount_asc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Amount (Low-High)'),
-                ),
-                RadioListTile<String>(
-                  value: 'name_asc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Name (A-Z)'),
-                ),
-                RadioListTile<String>(
-                  value: 'name_desc',
-                  groupValue: tempSortBy,
-                  onChanged: (v) => setModalState(() => tempSortBy = v!),
-                  title: const Text('Name (Z-A)'),
-                ),
-                const Divider(),
-                const Text('Payment Method:'),
-                DropdownButton2<String?>(
-                  value: tempPaymentMethod,
-                  isExpanded: true,
-                  hint: const Text('All'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('All')),
-                    ..._paymentMethods.map(
-                      (m) => DropdownMenuItem(value: m, child: Text(m)),
-                    ),
-                  ],
-                  onChanged: (v) => setModalState(() => tempPaymentMethod = v),
-                ),
-              ],
+            builder: (context, setModalState) => SizedBox(
+              width: double.maxFinite,
+              height: MediaQuery.of(context).size.height * 0.45,
+              child: ListView(
+                physics: const BouncingScrollPhysics(),
+                shrinkWrap: true,
+                children: [
+                  Text('Sort by:'),
+                  RadioListTile<String>(
+                    value: 'date_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Date (Newest)'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'date_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Date (Oldest)'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'amount_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Amount (High-Low)'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'amount_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Amount (Low-High)'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'name_asc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Name (A-Z)'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'name_desc',
+                    groupValue: tempSortBy,
+                    onChanged: (v) => setModalState(() => tempSortBy = v!),
+                    title: Text('Name (Z-A)'),
+                  ),
+                  Divider(),
+                  Text('Payment Method:'),
+                  DropdownButton2<String?>(
+                    value: tempPaymentMethod,
+                    isExpanded: true,
+                    hint: Text('All'),
+                    items: [
+                      DropdownMenuItem(value: null, child: Text('All')),
+                      ..._paymentMethods.map(
+                        (m) => DropdownMenuItem(value: m, child: Text(m)),
+                      ),
+                    ],
+                    onChanged: (v) =>
+                        setModalState(() => tempPaymentMethod = v),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
+              style: AppTheme.getStandardCancelButtonStyle(context),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -160,7 +175,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text('Apply'),
+              child: Text('Apply'),
             ),
           ],
         );
@@ -259,7 +274,16 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   }
 
   Future<void> _loadExpensesFromDb() async {
-    final expenses = await _expenseRepo.getAllExpenses();
+    final uid = await getCurrentUserUid();
+    debugPrint('ExpenseScreen: _loadExpensesFromDb fetched UID: $uid');
+    if (uid == null || uid.isEmpty) {
+      setState(() {
+        _allExpenses = [];
+        _filterExpenses();
+      });
+      return;
+    }
+    final expenses = await _expenseRepo.getAllExpenses(uid);
     setState(() {
       _allExpenses = expenses;
       _filterExpenses();
@@ -336,16 +360,16 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Align(
           alignment: Alignment.bottomCenter,
           child: Container(
-            margin: const EdgeInsets.only(top: 48),
+            margin: EdgeInsets.only(top: 48),
             decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark ? Colors.black : kCardBg,
+              color: AppTheme.getCardColor(context),
               borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
               boxShadow: [
                 BoxShadow(
@@ -377,7 +401,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           color: Color(0xFF1976D2),
                         ),
                       ),
-                      const SizedBox(height: 22),
+                      SizedBox(height: 22),
                       _buildAttractiveTextField(
                         context: context,
                         controller: nameController,
@@ -387,13 +411,14 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           if (val == null || val.trim().isEmpty) {
                             return 'Expense name is required';
                           }
-                          if (val.trim().length < 2 || val.trim().length > 100) {
+                          if (val.trim().length < 2 ||
+                              val.trim().length > 100) {
                             return 'Expense name must be 2-100 characters.';
                           }
                           return null;
                         },
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       _buildAttractiveTextField(
                         context: context,
                         controller: dateController,
@@ -424,7 +449,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                         },
                         suffixIcon: Icons.edit_calendar,
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       _buildAttractiveDropdown(
                         context: context,
                         value: selectedCategory,
@@ -437,7 +462,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           });
                         },
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       _buildAttractiveTextField(
                         context: context,
                         controller: amountController,
@@ -457,7 +482,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           return null;
                         },
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       _buildAttractiveDropdown(
                         context: context,
                         value: selectedPaymentMethod,
@@ -470,7 +495,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           });
                         },
                       ),
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       _buildAttractiveTextField(
                         context: context,
                         controller: descriptionController,
@@ -484,96 +509,188 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           return null;
                         },
                       ),
-                      const SizedBox(height: 28),
+                      SizedBox(height: 28),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
                             onPressed: () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              foregroundColor:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.white
+                                  : Color(0xFF1976D2),
+                            ),
                             child: Text(
                               'Cancel',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1976D2),
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Color(0xFF1976D2),
-                              textStyle: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                          SizedBox(width: 12),
+                          Container(
+                            decoration: AppTheme.getGradientDecoration(),
+                            child: ElevatedButton(
+                              style: AppTheme.getGradientSaveButtonStyle(
+                                context,
                               ),
-                              side: BorderSide.none,
-                            ),
-                            onPressed: () async {
-                              if (formKey.currentState!.validate()) {
-                                if (isEdit) {
-                                  final updatedExpense = Expense(
-                                    id: expense.id,
-                                    date: selectedDate,
-                                    category: selectedCategory,
-                                    amount: double.parse(amountController.text),
-                                    paymentMethod: selectedPaymentMethod,
-                                    description:
-                                        descriptionController.text.isNotEmpty
-                                        ? descriptionController.text
-                                        : null,
-                                    name: nameController.text.trim(),
-                                  );
-                                  await _expenseRepo.updateExpense(
-                                    updatedExpense,
-                                  );
-                                  await ActivityRepository().logActivity(
-                                    Activity(
-                                      type: 'expense_edit',
-                                      description:
-                                          'Edited expense: ${nameController.text.trim()} (Rs ${amountController.text})',
-                                      timestamp: DateTime.now(),
-                                      metadata: {
-                                        'id': expense.id,
-                                        'name': nameController.text.trim(),
-                                        'amount': amountController.text,
-                                        'category': selectedCategory,
-                                      },
-                                    ),
-                                  );
-                                } else {
-                                  final newExpense = Expense(
-                                    date: selectedDate,
-                                    category: selectedCategory,
-                                    amount: double.parse(amountController.text),
-                                    paymentMethod: selectedPaymentMethod,
-                                    description:
-                                        descriptionController.text.isNotEmpty
-                                        ? descriptionController.text
-                                        : null,
-                                    name: nameController.text.trim(),
-                                  );
-                                  await _expenseRepo.insertExpense(newExpense);
-                                  await ActivityRepository().logActivity(
-                                    Activity(
-                                      type: 'expense_add',
-                                      description:
-                                          'Added expense: ${nameController.text.trim()} (Rs ${amountController.text})',
-                                      timestamp: DateTime.now(),
-                                      metadata: {
-                                        'name': nameController.text.trim(),
-                                        'amount': amountController.text,
-                                        'category': selectedCategory,
-                                      },
-                                    ),
-                                  );
+                              onPressed: () {
+                                if (formKey.currentState!.validate()) {
+                                  // Fetch UID (can fail silently if offline, and use a fallback ID if needed)
+                                  getCurrentUserUid()
+                                      .then((uid) {
+                                        debugPrint(
+                                          'ExpenseScreen: Save pressed, fetched UID: $uid',
+                                        );
+
+                                        final safeUid = uid ?? 'offline_user';
+
+                                        final isValidUid = safeUid.isNotEmpty;
+                                        if (!isValidUid) {
+                                          debugPrint(
+                                            'ExpenseScreen: WARNING: UID is empty. Proceeding offline.',
+                                          );
+                                        }
+
+                                        if (isEdit) {
+                                          final updatedExpense = Expense(
+                                            id: expense.id,
+                                            userId: safeUid,
+                                            date: selectedDate,
+                                            category: selectedCategory,
+                                            amount: double.parse(
+                                              amountController.text,
+                                            ),
+                                            paymentMethod:
+                                                selectedPaymentMethod,
+                                            description:
+                                                descriptionController
+                                                    .text
+                                                    .isNotEmpty
+                                                ? descriptionController.text
+                                                : null,
+                                            name: nameController.text.trim(),
+                                          );
+
+                                          _expenseRepo.updateExpense(
+                                            updatedExpense,
+                                          ); // No await
+
+                                          // Log activity (non-blocking)
+                                          ActivityRepository().logActivity(
+                                            Activity(
+                                              userId: safeUid,
+                                              type: 'expense_edit',
+                                              description:
+                                                  'Edited expense: ${nameController.text.trim()} (Rs ${amountController.text})',
+                                              timestamp: DateTime.now(),
+                                              metadata: {
+                                                'id': expense.id,
+                                                'name': nameController.text
+                                                    .trim(),
+                                                'amount': amountController.text,
+                                                'category': selectedCategory,
+                                              },
+                                            ),
+                                          );
+                                        } else {
+                                          final newExpense = Expense(
+                                            userId: safeUid,
+                                            date: selectedDate,
+                                            category: selectedCategory,
+                                            amount: double.parse(
+                                              amountController.text,
+                                            ),
+                                            paymentMethod:
+                                                selectedPaymentMethod,
+                                            description:
+                                                descriptionController
+                                                    .text
+                                                    .isNotEmpty
+                                                ? descriptionController.text
+                                                : null,
+                                            name: nameController.text.trim(),
+                                          );
+
+                                          _expenseRepo.insertExpense(
+                                            newExpense,
+                                          ); // No await
+
+                                          // Refresh UI (local)
+
+                                          // Log activity (non-blocking)
+                                          ActivityRepository().logActivity(
+                                            Activity(
+                                              userId: safeUid,
+                                              type: 'expense_add',
+                                              description:
+                                                  'Added expense: ${nameController.text.trim()} (Rs ${amountController.text})',
+                                              timestamp: DateTime.now(),
+                                              metadata: {
+                                                'name': nameController.text
+                                                    .trim(),
+                                                'amount': amountController.text,
+                                                'category': selectedCategory,
+                                              },
+                                            ),
+                                          );
+                                        }
+
+                                        // Load from local DB
+                                        _loadExpensesFromDb(); // No await
+
+                                        Navigator.pop(context);
+                                      })
+                                      .catchError((e) {
+                                        debugPrint(
+                                          "ExpenseScreen: ERROR fetching UID: $e",
+                                        );
+                                        // Still save expense offline with fallback UID
+                                        final fallbackUid = 'offline_user';
+
+                                        final newExpense = Expense(
+                                          userId: fallbackUid,
+                                          date: selectedDate,
+                                          category: selectedCategory,
+                                          amount: double.parse(
+                                            amountController.text,
+                                          ),
+                                          paymentMethod: selectedPaymentMethod,
+                                          description:
+                                              descriptionController
+                                                  .text
+                                                  .isNotEmpty
+                                              ? descriptionController.text
+                                              : null,
+                                          name: nameController.text.trim(),
+                                        );
+
+                                        _expenseRepo.insertExpense(
+                                          newExpense,
+                                        ); // fallback save
+
+                                        final refreshManager =
+                                            Provider.of<RefreshManager>(
+                                              context,
+                                              listen: false,
+                                            );
+                                        refreshManager.refreshExpenses();
+                                        refreshManager.refreshDashboard();
+
+                                        final dashboardProvider =
+                                            Provider.of<DashboardProvider>(
+                                              context,
+                                              listen: false,
+                                            );
+
+                                        _loadExpensesFromDb(); // fallback reload
+
+                                        Navigator.pop(context);
+                                      });
                                 }
-                                await _loadExpensesFromDb();
-                                Navigator.pop(context);
-                              }
-                            },
-                            child: Text(
-                              'Save',
-                              style: TextStyle(color: Color(0xFF1976D2)),
+                              },
+
+                              child: Text('Save'),
                             ),
                           ),
                         ],
@@ -590,14 +707,34 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   }
 
   void _deleteExpense(Expense expense) async {
-    await _expenseRepo.deleteExpense(expense.id!);
+    final uid = await getCurrentUserUid();
+    debugPrint('ExpenseScreen: _deleteExpense fetched UID: $uid');
+    if (uid == null || uid.isEmpty) return;
+
+    // Ensure expense.id is properly cast to int
+    final expenseId = expense.id;
+    if (expenseId == null) {
+      debugPrint('ExpenseScreen: ERROR: expense.id is null!');
+      return;
+    }
+
+    await _expenseRepo.deleteExpense(expenseId, uid);
+
+    // Trigger refresh for all screens
+    final refreshManager = Provider.of<RefreshManager>(context, listen: false);
+    refreshManager.refreshExpenses();
+    refreshManager.refreshDashboard();
+
+    // Also trigger dashboard refresh directly
+
     await ActivityRepository().logActivity(
       Activity(
+        userId: uid,
         type: 'expense_delete',
         description: 'Deleted expense: ${expense.name} (Rs ${expense.amount})',
         timestamp: DateTime.now(),
         metadata: {
-          'id': expense.id,
+          'id': expenseId,
           'name': expense.name,
           'amount': expense.amount,
           'category': expense.category,
@@ -616,21 +753,31 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     return DefaultTabController(
       length: _categories.length + 1,
       child: Scaffold(
-        backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF0A2342)
+            : Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A2233) : Colors.white,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF1A2233)
+              : Colors.white,
           centerTitle: true,
           title: Text(
             'Expenses',
             style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : Theme.of(context).textTheme.bodyLarge?.color,
               fontWeight: FontWeight.bold,
               fontSize: 22,
             ),
           ),
-          iconTheme: IconThemeData(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color),
+          iconTheme: IconThemeData(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white
+                : Theme.of(context).textTheme.bodyLarge?.color,
+          ),
           elevation: 0,
-          shape: const RoundedRectangleBorder(
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
           ),
           bottom: PreferredSize(
@@ -646,8 +793,13 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                   indicator: UnderlineTabIndicator(
                     borderSide: BorderSide(width: 3, color: Color(0xFF1976D2)),
                   ),
-                  labelColor: Color(0xFF1976D2),
-                  unselectedLabelColor: Color(0xFF1976D2).withOpacity(0.5),
+                  labelColor: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Color(0xFF1976D2),
+                  unselectedLabelColor:
+                      Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white.withOpacity(0.7)
+                      : Color(0xFF1976D2).withOpacity(0.5),
                   labelStyle: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -657,7 +809,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                     fontSize: 15,
                   ),
                   tabs: [
-                    const Tab(text: 'ALL'),
+                    Tab(text: 'ALL'),
                     ..._categories.map(
                       (category) => Tab(
                         child: Row(
@@ -667,10 +819,16 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               size: 16,
                               color: Color(0xFF1976D2),
                             ),
-                            const SizedBox(width: 4),
+                            SizedBox(width: 4),
                             Text(
                               category,
-                              style: TextStyle(color: Color(0xFF1976D2)),
+                              style: TextStyle(
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : Color(0xFF1976D2),
+                              ),
                             ),
                           ],
                         ),
@@ -686,7 +844,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           children: [
             // Total Expense Card
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
               child: Card(
                 elevation: 5,
                 shape: RoundedRectangleBorder(
@@ -714,10 +872,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                     ],
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 16,
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -731,11 +886,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               color: Colors.white,
                               size: 24,
                             ),
-                            const SizedBox(width: 12),
+                            SizedBox(width: 12),
                             Flexible(
                               child: Text(
                                 totalLabel,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 18,
@@ -755,12 +910,12 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ],
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Flexible(
                         flex: 1,
                         child: Text(
                           'Rs ${_getTotalExpense(category).toStringAsFixed(2)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
@@ -785,34 +940,59 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
             // Search Bar
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (val) {
-                  setState(() {
-                    _searchQuery = val;
-                    _filterExpenses();
-                  });
-                },
-                decoration: InputDecoration(
-                  hintText: 'Search by description, vendor, or reference...',
-                  prefixIcon: Icon(Icons.search, color: kBlue),
-                  suffixIcon: IconButton(
-                    icon: Icon(Icons.filter_alt, color: kBlue),
-                    tooltip: 'Filter & Sort',
-                    onPressed: _showFilterDialog,
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (val) {
+                        setState(() {
+                          _searchQuery = val;
+                          _filterExpenses();
+                        });
+                      },
+                      decoration: InputDecoration(
+                        hintText:
+                            'Search by description, vendor, or reference...',
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: AppTheme.getPrimaryColor(context),
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.getCardColor(context),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 0,
+                        ),
+                      ),
+                    ),
                   ),
-                  filled: true,
-                  fillColor: kCardBg,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Color(0xFF0A2342),
+                          Color(0xFF123060),
+                          Color(0xFF1976D2),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.filter_alt, color: Colors.white),
+                      tooltip: 'Filter & Sort',
+                      onPressed: _showFilterDialog,
+                    ),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 0,
-                  ),
-                ),
+                ],
               ),
             ),
 
@@ -830,7 +1010,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       itemBuilder: (context, idx) {
                         final expense = _filteredExpenses[idx];
                         return Padding(
-                          padding: const EdgeInsets.symmetric(
+                          padding: EdgeInsets.symmetric(
                             horizontal: 8,
                             vertical: 6,
                           ),
@@ -839,21 +1019,92 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                             direction: DismissDirection.endToStart,
                             background: Container(
                               alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                              ),
+                              padding: EdgeInsets.symmetric(horizontal: 20),
                               decoration: BoxDecoration(
-                                color: Colors.red.shade100,
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? const Color(0xFFDC3545)
+                                    : Colors.red.shade100,
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.delete,
-                                color: Colors.red,
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : Colors.red,
                                 size: 32,
                               ),
                             ),
-                            onDismissed: (direction) {
-                              _deleteExpense(expense);
+                            confirmDismiss: (direction) async {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withAlpha(
+                                            (0.1 * 255).toInt(),
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.warning_rounded,
+                                          color: Colors.red,
+                                          size: 20,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text('Delete Expense?'),
+                                    ],
+                                  ),
+                                  content: Text(
+                                    'Are you sure you want to delete "${expense.name}"? This action cannot be undone.',
+                                    style: TextStyle(
+                                      color:
+                                          Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white
+                                          : Colors.black,
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: Text(
+                                        'Cancel',
+                                        style: TextStyle(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.white
+                                              : Colors.black,
+                                        ),
+                                      ),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                _deleteExpense(expense);
+                              }
+                              return confirmed;
                             },
                             child: Card(
                               elevation: 1,
@@ -865,20 +1116,22 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                 onTap: () =>
                                     _showAddEditExpense(expense: expense),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(
+                                  padding: EdgeInsets.symmetric(
                                     horizontal: 14,
                                     vertical: 12,
                                   ),
-                                  constraints: const BoxConstraints(
-                                    minHeight: 80,
-                                  ),
+                                  constraints: BoxConstraints(minHeight: 80),
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context).brightness == Brightness.dark ? Color(0xFF232A36) : Colors.white,
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? const Color(0xFF013A63)
+                                        : Colors.white,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Row(
                                     crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                        CrossAxisAlignment.center,
                                     children: [
                                       CircleAvatar(
                                         backgroundColor: _getCategoryColor(
@@ -891,7 +1144,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(width: 12),
+                                      SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
@@ -902,39 +1155,57 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                                 Expanded(
                                                   child: Text(
                                                     expense.name,
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       fontWeight:
                                                           FontWeight.bold,
                                                       fontSize: 16,
+                                                      color:
+                                                          Theme.of(
+                                                                context,
+                                                              ).brightness ==
+                                                              Brightness.dark
+                                                          ? Colors.white
+                                                          : Colors.black,
                                                     ),
                                                     maxLines: 1,
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                   ),
                                                 ),
-                                                Text(
-                                                  'Rs ${expense.amount.toStringAsFixed(2)}',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    color: Colors.red,
-                                                    fontWeight: FontWeight.bold,
+                                                Container(
+                                                  alignment: Alignment.center,
+                                                  child: Text(
+                                                    'Rs ${expense.amount.toStringAsFixed(2)}',
+                                                    style: TextStyle(
+                                                      fontSize: 16,
+                                                      color: Colors.red,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
                                                   ),
                                                 ),
                                               ],
                                             ),
-                                            const SizedBox(height: 4),
+                                            SizedBox(height: 4),
                                             if (expense.vendor != null &&
                                                 expense.vendor!.isNotEmpty)
                                               Text(
                                                 expense.vendor!,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontSize: 13,
-                                                  color: Colors.black87,
+                                                  color:
+                                                      Theme.of(
+                                                            context,
+                                                          ).brightness ==
+                                                          Brightness.dark
+                                                      ? Colors.white
+                                                            .withOpacity(0.8)
+                                                      : Colors.black87,
                                                 ),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                               ),
-                                            const SizedBox(height: 2),
+                                            SizedBox(height: 2),
                                             Row(
                                               children: [
                                                 // Category container
@@ -944,15 +1215,14 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                                   children: [
                                                     Container(
                                                       padding:
-                                                          const EdgeInsets.symmetric(
+                                                          EdgeInsets.symmetric(
                                                             horizontal: 6,
                                                             vertical: 2,
                                                           ),
                                                       decoration: BoxDecoration(
                                                         color:
                                                             _getCategoryColor(
-                                                              expense
-                                                                  .category,
+                                                              expense.category,
                                                             ).withAlpha(
                                                               (0.1 * 255)
                                                                   .toInt(),
@@ -967,21 +1237,27 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                                         style: TextStyle(
                                                           fontSize: 11,
                                                           color:
-                                                              _getCategoryColor(
-                                                                expense
-                                                                    .category,
-                                                              ),
+                                                              Theme.of(
+                                                                    context,
+                                                                  ).brightness ==
+                                                                  Brightness
+                                                                      .dark
+                                                              ? Colors.white
+                                                              : _getCategoryColor(
+                                                                  expense
+                                                                      .category,
+                                                                ),
                                                           fontWeight:
                                                               FontWeight.w500,
                                                         ),
                                                       ),
                                                     ),
-                                                    const SizedBox(height: 4),
+                                                    SizedBox(height: 4),
                                                     Row(
                                                       children: [
                                                         Container(
                                                           padding:
-                                                              const EdgeInsets.symmetric(
+                                                              EdgeInsets.symmetric(
                                                                 horizontal: 6,
                                                                 vertical: 2,
                                                               ),
@@ -1001,21 +1277,25 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                                           child: Text(
                                                             expense
                                                                 .paymentMethod,
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 11,
-                                                                  color: Color(
-                                                                    0xFF1976D2,
-                                                                  ),
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w500,
-                                                                ),
+                                                            style: TextStyle(
+                                                              fontSize: 11,
+                                                              color:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      ).brightness ==
+                                                                      Brightness
+                                                                          .dark
+                                                                  ? Colors.white
+                                                                  : Color(
+                                                                      0xFF1976D2,
+                                                                    ),
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                            ),
                                                           ),
                                                         ),
-                                                        const SizedBox(
-                                                          width: 8,
-                                                        ),
+                                                        SizedBox(width: 8),
                                                         Text(
                                                           DateFormat(
                                                             'dd MMM, yyyy',
@@ -1037,136 +1317,135 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(width: 4),
-                                      PopupMenuButton<String>(
-                                        icon: const Icon(
-                                          Icons.more_vert,
-                                          color: Colors.black54,
-                                          size: 22,
-                                        ),
-                                        onSelected: (value) {
-                                          if (value == 'details') {
-                                            showDialog(
-                                              context: context,
-                                              builder: (ctx) => AlertDialog(
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                ),
-                                                content: SizedBox(
-                                                  height:
-                                                      MediaQuery.of(
+                                      SizedBox(width: 4),
+                                      Container(
+                                        alignment: Alignment.center,
+                                        child: PopupMenuButton<String>(
+                                          icon: Icon(
+                                            Icons.more_vert,
+                                            color:
+                                                Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white
+                                                : Colors.black54,
+                                            size: 22,
+                                          ),
+                                          onSelected: (value) {
+                                            if (value == 'details') {
+                                              showDialog(
+                                                context: context,
+                                                builder: (ctx) => AlertDialog(
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          18,
+                                                        ),
+                                                  ),
+                                                  content: SizedBox(
+                                                    height:
+                                                        MediaQuery.of(
+                                                                  context,
+                                                                ).size.height *
+                                                                0.5 >
+                                                            300
+                                                        ? 300
+                                                        : MediaQuery.of(
                                                                 context,
                                                               ).size.height *
-                                                              0.5 >
-                                                          300
-                                                      ? 300
-                                                      : MediaQuery.of(
-                                                              context,
-                                                            ).size.height *
-                                                            0.5,
-                                                  child: Scrollbar(
-                                                    thumbVisibility: true,
-                                                    child: SingleChildScrollView(
-                                                      padding: EdgeInsets.all(
-                                                        18,
-                                                      ),
-                                                      child: Column(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          Text(
-                                                            'Description:',
-                                                            style: TextStyle(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: kBlue,
+                                                              0.5,
+                                                    child: Scrollbar(
+                                                      thumbVisibility: true,
+                                                      child: SingleChildScrollView(
+                                                        padding: EdgeInsets.all(
+                                                          18,
+                                                        ),
+                                                        child: Column(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              'Description:',
+                                                              style: TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                color:
+                                                                    AppTheme.getPrimaryColor(
+                                                                      context,
+                                                                    ),
+                                                              ),
                                                             ),
-                                                          ),
-                                                          SizedBox(height: 6),
-                                                          Text(
-                                                            expense.description ??
-                                                                'No description',
-                                                            style: TextStyle(
-                                                              fontSize: 15,
+                                                            SizedBox(height: 6),
+                                                            Text(
+                                                              expense.description ??
+                                                                  'No description',
+                                                              style: TextStyle(
+                                                                fontSize: 15,
+                                                              ),
                                                             ),
-                                                          ),
-                                                        ],
+                                                          ],
+                                                        ),
                                                       ),
                                                     ),
                                                   ),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(ctx),
+                                                      child: Text(
+                                                        'Close',
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(ctx),
-                                                    child: Text(
-                                                      'Close',
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
+                                              );
+                                            } else if (value == 'edit') {
+                                              _showAddEditExpense(
+                                                expense: expense,
+                                              );
+                                            }
+                                          },
+                                          itemBuilder: (context) => [
+                                            PopupMenuItem(
+                                              value: 'details',
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.info_outline,
+                                                    color:
+                                                        AppTheme.getPrimaryColor(
+                                                          context,
+                                                        ),
+                                                    size: 18,
                                                   ),
+                                                  SizedBox(width: 8),
+                                                  Text('Details'),
                                                 ],
                                               ),
-                                            );
-                                          } else if (value == 'edit') {
-                                            _showAddEditExpense(
-                                              expense: expense,
-                                            );
-                                          } else if (value == 'delete') {
-                                            _deleteExpense(expense);
-                                          }
-                                        },
-                                        itemBuilder: (context) => [
-                                          const PopupMenuItem(
-                                            value: 'details',
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.info_outline,
-                                                  color: kBlue,
-                                                  size: 18,
-                                                ),
-                                                SizedBox(width: 8),
-                                                Text('Details'),
-                                              ],
                                             ),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'edit',
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.edit,
-                                                  color: Colors.blue,
-                                                  size: 18,
-                                                ),
-                                                SizedBox(width: 8),
-                                                Text('Edit'),
-                                              ],
+                                            PopupMenuItem(
+                                              value: 'edit',
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.edit,
+                                                    color: Color(0xFF1976D2),
+                                                    size: 18,
+                                                  ),
+                                                  SizedBox(width: 8),
+                                                  Text('Edit'),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'delete',
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.delete,
-                                                  color: Colors.red,
-                                                  size: 18,
-                                                ),
-                                                SizedBox(width: 8),
-                                                Text('Delete'),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -1223,8 +1502,8 @@ Widget _buildAttractiveTextField({
 }) {
   return Material(
     elevation: 1.0,
-    borderRadius: BorderRadius.circular(10),
-    shadowColor: Colors.black12,
+    borderRadius: BorderRadius.circular(12),
+    shadowColor: AppTheme.getShadowColor(context),
     child: TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -1232,32 +1511,13 @@ Widget _buildAttractiveTextField({
       readOnly: readOnly,
       maxLines: maxLines,
       onTap: onTap,
-      style: TextStyle(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87),
-      decoration: InputDecoration(
+      style: TextStyle(color: AppTheme.getTextColor(context)),
+      decoration: AppTheme.getStandardInputDecoration(
+        context,
         labelText: label,
-        labelStyle: const TextStyle(color: kBlue, fontSize: 14),
-        prefixIcon: Icon(icon, color: kBlue, size: 20),
-        suffixIcon: suffixIcon != null
-            ? Icon(suffixIcon, color: kBlue, size: 20)
-            : null,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: kLightBorder),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: kLightBorder),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: kBlue),
-        ),
-        filled: true,
-        fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.black : kWhite,
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 10,
-          horizontal: 10,
-        ),
+        hintText: label,
+        prefixIcon: icon,
+        suffixIcon: suffixIcon,
       ),
     ),
   );
@@ -1281,16 +1541,20 @@ Widget _buildAttractiveDropdown({
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [kWhite, kF8F9FA, kF1F3F4],
+          colors: [
+            AppTheme.getBackgroundColor(context),
+            AppTheme.getBackgroundColor(context),
+            AppTheme.getBackgroundColor(context),
+          ],
           stops: const [0.0, 0.5, 1.0],
         ),
       ),
       child: DropdownButtonFormField2<String>(
         value: value,
         isExpanded: true,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 14,
-          color: Colors.black87,
+          color: AppTheme.getTextColor(context),
           fontWeight: FontWeight.w500,
         ),
         dropdownStyleData: DropdownStyleData(
@@ -1299,7 +1563,11 @@ Widget _buildAttractiveDropdown({
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [kWhite, kF8F9FA, kF1F3F4],
+              colors: [
+                AppTheme.getBackgroundColor(context),
+                AppTheme.getBackgroundColor(context),
+                AppTheme.getBackgroundColor(context),
+              ],
               stops: const [0.0, 0.5, 1.0],
             ),
             boxShadow: [
@@ -1314,45 +1582,43 @@ Widget _buildAttractiveDropdown({
         ),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(
-            color: kBlue,
+          labelStyle: TextStyle(
+            color: AppTheme.getPrimaryColor(context),
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
-          prefixIcon: Icon(icon, color: kBlue, size: 20),
+          prefixIcon: Icon(
+            icon,
+            color: AppTheme.getPrimaryColor(context),
+            size: 20,
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: kLightBorder),
+            borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: kLightBorder),
+            borderSide: BorderSide.none,
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: kBlue, width: 1.5),
+            borderSide: BorderSide.none,
           ),
           filled: true,
-          fillColor: kTransparent,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 12,
-            horizontal: 12,
-          ),
+          fillColor: Colors.transparent,
+          contentPadding: EdgeInsets.symmetric(vertical: 12, horizontal: 12),
         ),
         items: items
             .map(
               (item) => DropdownMenuItem(
                 value: item,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 4,
-                  ),
+                  padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   child: Text(
                     item,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
-                      color: Colors.black87,
+                      color: AppTheme.getTextColor(context),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1366,7 +1632,7 @@ Widget _buildAttractiveDropdown({
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: kLightBorder),
+            border: Border.all(color: Colors.transparent),
           ),
         ),
         menuItemStyleData: MenuItemStyleData(

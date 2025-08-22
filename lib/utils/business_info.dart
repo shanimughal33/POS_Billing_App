@@ -1,4 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import '../repositories/settings_repository.dart';
+import '../models/settings.dart';
 
 class BusinessInfo {
   final String name;
@@ -29,25 +31,52 @@ class BusinessInfo {
 
   static Future<BusinessInfo> load() async {
     final prefs = await SharedPreferences.getInstance();
-    String taxRate = prefs.getString('taxRate') ?? '0';
-    double defaultDiscount = prefs.getDouble('defaultDiscount') ?? 0.0;
-    String phone = prefs.getString('businessPhone') ?? 'N/A';
-    String customFooter = prefs.getString('customFooter') ?? 'Thank you for your business!';
-
+    final uid = prefs.getString('current_uid');
+    if (uid == null || uid.isEmpty) {
+      // Return default business info if no user is logged in
+      return BusinessInfo(
+        name: 'Business Name',
+        address: 'Business Address',
+        phone: 'N/A',
+        email: 'Business Email',
+        currency: 'Rs',
+        taxRate: '0',
+        supportPhone: 'N/A',
+        businessLogoPath: '',
+        customFooter: 'Thank you for your business!',
+        enableDiscounts: true,
+        defaultDiscount: 0.0,
+      );
+    }
+    final settings = await SettingsRepository().getSettings(uid);
+    if (settings == null) {
+      // Return default business info if no settings found
+      return BusinessInfo(
+        name: 'Business Name',
+        address: 'Business Address',
+        phone: 'N/A',
+        email: 'Business Email',
+        currency: 'Rs',
+        taxRate: '0',
+        supportPhone: 'N/A',
+        businessLogoPath: '',
+        customFooter: 'Thank you for your business!',
+        enableDiscounts: true,
+        defaultDiscount: 0.0,
+      );
+    }
     return BusinessInfo(
-      name: prefs.getString('businessName') ?? 'Business Name',
-      address: prefs.getString('businessAddress') ?? 'Business Address',
-      phone: phone,
-      email: prefs.getString('businessEmail') ?? 'Business Email',
-      currency: prefs.getString('currency') ?? 'Rs',
-      taxRate: taxRate,
-      supportPhone:
-          prefs.getString('supportPhone') ??
-          phone,
-      businessLogoPath: prefs.getString('businessLogoPath') ?? '',
-      customFooter: customFooter,
-      enableDiscounts: prefs.getBool('enableDiscounts') ?? true,
-      defaultDiscount: defaultDiscount,
+      name: settings.businessName ?? 'Business Name',
+      address: settings.businessAddress ?? 'Business Address',
+      phone: settings.businessPhone ?? 'N/A',
+      email: settings.businessEmail ?? 'Business Email',
+      currency: settings.currency ?? 'Rs',
+      taxRate: settings.taxRate ?? '0',
+      supportPhone: settings.supportPhone ?? (settings.businessPhone ?? 'N/A'),
+      businessLogoPath: settings.businessLogoPath ?? '',
+      customFooter: settings.customFooter ?? 'Thank you for your business!',
+      enableDiscounts: settings.enableDiscounts ?? true,
+      defaultDiscount: settings.defaultDiscount ?? 0.0,
     );
   }
 }

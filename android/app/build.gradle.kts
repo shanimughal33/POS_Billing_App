@@ -14,6 +14,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // Enable core library desugaring
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -29,6 +31,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // MultiDex support
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -42,4 +47,26 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-auth")
+    
+    // MultiDex support
+    implementation("androidx.multidex:multidex:2.0.1")
+    
+    // Google Play Services
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+    
+    // AndroidX
+    implementation("androidx.core:core:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.work:work-runtime:2.9.0")
+    
+    // Core library desugaring
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

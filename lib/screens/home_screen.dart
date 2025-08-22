@@ -5,243 +5,35 @@ import 'package:forward_billing_app/repositories/people_repository.dart';
 import 'package:forward_billing_app/repositories/inventory_repository.dart';
 import 'package:forward_billing_app/repositories/expense_repository.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart';
 import 'widgets/chart_comparison.dart';
 import '../models/people.dart';
-import 'inventory_screen.dart';
-import 'sales_screen.dart';
-import 'purchase_screen.dart';
-import 'expense_screen.dart';
-import 'report_screen.dart';
-import 'calculator.dart';
+import '../models/expense.dart';
 import 'package:provider/provider.dart';
+import '../cubit/notification_cubit.dart';
+import '../screens/notification_screen.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'peoples_screen.dart';
+
 import '../models/bill.dart';
 import '../models/inventory_item.dart';
-import 'settings_screen.dart';
+
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import 'package:flutter/material.dart' show RouteAware, ModalRoute;
-import '../main.dart' show routeObserver;
+import '../utils/auth_utils.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+import '../providers/dashboard_provider.dart';
 
 String formatIndianAmount(num amount) {
   if (amount.abs() >= 10000000) {
     return '${(amount / 10000000).toStringAsFixed(2)} Cr';
   } else if (amount.abs() >= 100000) {
-    return '${(amount / 100000).toStringAsFixed(2)} Lakh';
+    return '${(amount / 100000).toStringAsFixed(2)} Lac';
   } else {
     final formatter = NumberFormat('#,##,##0.##');
     return formatter.format(amount);
-  }
-}
-
-class DashboardProvider with ChangeNotifier {
-  final BillRepository _billRepo;
-  final InventoryRepository _inventoryRepo;
-  final PeopleRepository _peopleRepo;
-  final ExpenseRepository _expenseRepo;
-
-  DashboardProvider({
-    required BillRepository billRepo,
-    required InventoryRepository inventoryRepo,
-    required PeopleRepository peopleRepo,
-    required ExpenseRepository expenseRepo,
-  })  : _billRepo = billRepo,
-        _inventoryRepo = inventoryRepo,
-        _peopleRepo = peopleRepo,
-        _expenseRepo = expenseRepo {
-    _listenToRepositories();
-    _loadData();
-  }
-
-  void _listenToRepositories() {
-    _billRepo.addListener(_loadData);
-    _inventoryRepo.addListener(_loadData);
-    _peopleRepo.addListener(_loadData);
-    _expenseRepo.addListener(_loadData);
-  }
-
-  @override
-  void dispose() {
-    _billRepo.removeListener(_loadData);
-    _inventoryRepo.removeListener(_loadData);
-    _peopleRepo.removeListener(_loadData);
-    _expenseRepo.removeListener(_loadData);
-    super.dispose();
-  }
-
-  bool isLoading = true;
-  bool hasError = false;
-  String errorMessage = '';
-
-  // KPIs
-  double totalSales = 0;
-  double totalPurchase = 0;
-  double totalExpense = 0;
-  double totalProfit = 0;
-
-  // Chart data
-  List<FlSpot> salesChartData = [];
-  List<FlSpot> purchaseChartData = [];
-  List<String> comparisonChartLabels = [];
-
-  // For stat cards
-  int customerCount = 0;
-  int productCount = 0;
-
-  // Recent transactions
-  List<Map<String, dynamic>> recentTransactions = [];
-
-  // Expose all loaded bills and inventory for use in UI
-  List<Bill> allBills = [];
-  List<InventoryItem> allInventory = [];
-
-  double salesChange = 0.0;
-  double purchaseChange = 0.0;
-  double expenseChange = 0.0;
-  double profitChange = 0.0;
-  double inventoryChange = 0.0;
-  double peopleChange = 0.0;
-
-  Future<void> _loadData() async {
-    try {
-      isLoading = true;
-      hasError = false;
-      errorMessage = '';
-      notifyListeners();
-
-      final bills = await _billRepo.getAllBills();
-      final inventory = await _inventoryRepo.getAllItems();
-      final expenses = await _expenseRepo.getAllExpenses();
-      final people = await _peopleRepo.getAllPeople();
-
-      // Store for UI use
-      allBills = bills;
-      allInventory = inventory;
-
-      // KPIs
-      totalSales = bills.fold(0.0, (sum, bill) => sum + (bill.total ?? 0));
-      totalPurchase = inventory.fold(
-        0.0,
-        (sum, item) => sum + (item.price * item.quantity),
-      );
-      totalExpense = expenses.fold(0.0, (sum, exp) => sum + exp.amount);
-      totalProfit = totalSales - totalExpense;
-      customerCount = people.where((p) => p.category == 'customer').length;
-      productCount = inventory.length;
-
-      // Calculate percent changes (daily, capped at ±100%)
-      final now = DateTime.now();
-      double todaySales = 0, yesterdaySales = 0;
-      double todayPurchase = 0, yesterdayPurchase = 0;
-      double todayExpense = 0, yesterdayExpense = 0;
-      double todayProfit = 0, yesterdayProfit = 0;
-      int todayInventory = 0, yesterdayInventory = 0;
-      int todayPeople = 0, yesterdayPeople = 0;
-      for (final bill in bills) {
-        if (_isSameDay(bill.date, now)) {
-          todaySales += bill.total ?? 0;
-        } else if (_isSameDay(bill.date, now.subtract(const Duration(days: 1)))) {
-          yesterdaySales += bill.total ?? 0;
-        }
-      }
-      for (final item in inventory) {
-        if (_isSameDay(item.createdAt ?? now, now)) {
-          todayPurchase += item.price * item.quantity;
-          todayInventory++;
-        } else if (_isSameDay(item.createdAt ?? now, now.subtract(const Duration(days: 1)))) {
-          yesterdayPurchase += item.price * item.quantity;
-          yesterdayInventory++;
-        }
-      }
-      for (final exp in expenses) {
-        if (_isSameDay(exp.date, now)) {
-          todayExpense += exp.amount;
-        } else if (_isSameDay(exp.date, now.subtract(const Duration(days: 1)))) {
-          yesterdayExpense += exp.amount;
-        }
-      }
-      for (final p in people) {
-        if (_isSameDay(p.lastTransactionDate, now)) {
-          todayPeople++;
-        } else if (_isSameDay(p.lastTransactionDate, now.subtract(const Duration(days: 1)))) {
-          yesterdayPeople++;
-        }
-      }
-      todayProfit = todaySales - todayExpense;
-      yesterdayProfit = yesterdaySales - yesterdayExpense;
-      salesChange = _calcPercentChange(todaySales, yesterdaySales);
-      purchaseChange = _calcPercentChange(todayPurchase, yesterdayPurchase);
-      expenseChange = _calcPercentChange(todayExpense, yesterdayExpense);
-      profitChange = _calcPercentChange(todayProfit, yesterdayProfit);
-      inventoryChange = _calcPercentChange(todayInventory.toDouble(), yesterdayInventory.toDouble());
-      peopleChange = _calcPercentChange(todayPeople.toDouble(), yesterdayPeople.toDouble());
-      notifyListeners();
-
-      // Chart data (last 7 days)
-      salesChartData = [];
-      purchaseChartData = [];
-      comparisonChartLabels = [];
-      final nowChart = DateTime.now();
-      for (int i = 6; i >= 0; i--) {
-        final date = nowChart.subtract(Duration(days: i));
-        final daySales = bills
-            .where((bill) => _isSameDay(bill.date, date))
-            .fold(0.0, (sum, bill) => sum + (bill.total ?? 0));
-        salesChartData.add(FlSpot((6 - i).toDouble(), daySales));
-        final dayPurchase = inventory
-            .where((item) => _isSameDay(item.createdAt ?? DateTime.now(), date))
-            .fold(0.0, (sum, item) => sum + (item.price * item.quantity));
-        purchaseChartData.add(FlSpot((6 - i).toDouble(), dayPurchase));
-        comparisonChartLabels.add('${date.month}/${date.day}');
-      }
-
-      // Recent transactions (last 5 bills)
-      final recentTxns = bills.where((b) => b.isDeleted != true).toList()
-        ..sort((a, b) => b.date.compareTo(a.date));
-      recentTransactions = recentTxns
-          .take(5)
-          .map(
-            (b) => {
-              "name": b.items.isNotEmpty ? b.items.first.name : "Unknown",
-              "date": DateFormat('dd MMM yyyy').format(b.date),
-              "status": "Fulfilled",
-              "txn": "# 24{b.id ?? ''}",
-              "image":
-                  "assets/product_placeholder.png", // Replace with real image if available
-            },
-          )
-          .toList();
-
-      isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      errorMessage = 'Failed to load dashboard data.';
-      hasError = true;
-      isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  // Helper to calculate capped percent change
-  double _calcPercentChange(double today, double yesterday) {
-    if (yesterday == 0 && today > 0) return 100.0;
-    if (yesterday == 0 && today == 0) return 0.0;
-    double percent = ((today - yesterday) / (yesterday == 0 ? 1 : yesterday)) * 100;
-    if (percent > 100) percent = 100;
-    if (percent < -100) percent = -100;
-    return percent;
-  }
-
-  bool _isSameDay(DateTime date1, DateTime date2) {
-    return date1.year == date2.year &&
-        date1.month == date2.month &&
-        date1.day == date2.day;
-  }
-
-  Future<void> refreshData() async {
-    await _loadData();
   }
 }
 
@@ -252,27 +44,9 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with RouteAware {
-  // Repositories for real-time data
-  final BillRepository _billRepo = BillRepository();
-  final PeopleRepository _peopleRepo = PeopleRepository();
-  final InventoryRepository _inventoryRepo = InventoryRepository();
-  final ExpenseRepository _expenseRepo = ExpenseRepository();
-
-  // Dashboard data
-  double _totalBalance = 0;
-  int _customerCount = 0;
-  int _productCount = 0;
-  double _revenue = 0;
-  double _expense = 0;
-  // REMOVE: List<Map<String, dynamic>> _recentTransactions = [];
-  bool _loading = true;
-  List<People> _allPeople = [];
-
-  // Add filter state
+class _HomeScreenState extends State<HomeScreen> {
   String _graphFilter = 'daily'; // 'daily', 'weekly', 'monthly'
 
-  // Helper for x-axis labels based on filter
   List<String> _getGraphLabels() {
     final now = DateTime.now();
     if (_graphFilter == 'daily') {
@@ -294,15 +68,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     }
   }
 
-  // Helper for graph data based on filter
   List<FlSpot> _getSalesData(DashboardProvider provider) {
     if (_graphFilter == 'daily') {
       return provider.salesChartData;
     } else if (_graphFilter == 'weekly') {
-      // Aggregate by week (last 4 weeks)
       final now = DateTime.now();
       List<double> weeklyTotals = List.filled(4, 0);
-      for (final bill in provider.allBills) {
+      for (final bill in provider.bills) {
         for (int w = 0; w < 4; w++) {
           final weekStart = now.subtract(Duration(days: (3 - w) * 7));
           final weekEnd = weekStart.add(const Duration(days: 6));
@@ -317,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       // monthly (last 6 months)
       final now = DateTime.now();
       List<double> monthlyTotals = List.filled(6, 0);
-      for (final bill in provider.allBills) {
+      for (final bill in provider.bills) {
         for (int m = 0; m < 6; m++) {
           final month = DateTime(now.year, now.month - 5 + m, 1);
           if (bill.date.year == month.year && bill.date.month == month.month) {
@@ -333,10 +105,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     if (_graphFilter == 'daily') {
       return provider.purchaseChartData;
     } else if (_graphFilter == 'weekly') {
-      // Aggregate by week (last 4 weeks)
       final now = DateTime.now();
       List<double> weeklyTotals = List.filled(4, 0);
-      for (final item in provider.allInventory) {
+      for (final item in provider.inventory) {
         for (int w = 0; w < 4; w++) {
           final weekStart = now.subtract(Duration(days: (3 - w) * 7));
           final weekEnd = weekStart.add(const Duration(days: 6));
@@ -355,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       // monthly (last 6 months)
       final now = DateTime.now();
       List<double> monthlyTotals = List.filled(6, 0);
-      for (final item in provider.allInventory) {
+      for (final item in provider.inventory) {
         for (int m = 0; m < 6; m++) {
           final month = DateTime(now.year, now.month - 5 + m, 1);
           final createdAt = item.createdAt ?? now;
@@ -371,67 +142,17 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
-    _fetchAllPeople();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Optionally refresh people when dependencies change (e.g., after navigation)
-    _fetchAllPeople();
-    // Register for route changes
-    routeObserver.subscribe(this, ModalRoute.of(context)!);
-  }
-
-  bool _showSearchBar = false;
-  final TextEditingController _searchBarController = TextEditingController();
-  List<Map<String, dynamic>> _searchResults = [];
-
-  final List<Map<String, dynamic>> _menuScreens = [
-    {'label': 'Inventory', 'icon': Icons.inventory_2, 'route': '/inventory'},
-    {'label': 'Sales', 'icon': Icons.point_of_sale, 'route': '/sales'},
-    {'label': 'Purchase', 'icon': Icons.shopping_cart, 'route': '/purchase'},
-    {'label': 'Expense', 'icon': Icons.money_off, 'route': '/expense'},
-    {'label': 'Reports', 'icon': Icons.bar_chart, 'route': '/reports'},
-    {'label': 'Calculator', 'icon': Icons.calculate, 'route': '/calculator'},
-    {'label': 'People', 'icon': Icons.people, 'route': '/peoples'},
-    {'label': 'Settings', 'icon': Icons.settings, 'route': '/settings'},
-  ];
-
-  void _onSearchChanged(String query) {
-    setState(() {
-      _searchResults = _menuScreens
-          .where((item) => item['label'].toLowerCase().contains(query.toLowerCase()))
-          .toList();
-    });
-  }
-
-  @override
-  void dispose() {
-    routeObserver.unsubscribe(this);
-    _searchBarController.dispose();
-    super.dispose();
-  }
-
-  // Called when coming back to HomeScreen
-  @override
-  void didPopNext() {
-    // Reload dashboard data
-    Provider.of<DashboardProvider>(context, listen: false).refreshData();
-    _fetchAllPeople();
-    super.didPopNext();
-  }
-
-  Future<void> _fetchAllPeople() async {
-    final people = await _peopleRepo.getAllPeople();
-    if (!mounted) return;
-    setState(() {
-      _allPeople = people;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = Provider.of<DashboardProvider>(context, listen: false);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentGreen = const Color(0xFF128C7E);
     final darkBlue = const Color(0xFF0A2342);
     final blueGradient = const LinearGradient(
@@ -443,774 +164,1243 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
-    final user = FirebaseAuth.instance.currentUser;
-    final userName = user?.displayName ?? (user?.email?.split('@').first ?? '');
-    final userEmail = user?.email ?? '';
-    final userPhoto = user?.photoURL;
+    final userName = "User"; // Replace with real user name if available
     final notificationCount = 3; // Replace with real notification count
 
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider<BillRepository>(create: (_) => BillRepository()),
-        ChangeNotifierProvider<InventoryRepository>(create: (_) => InventoryRepository()),
-        ChangeNotifierProvider<PeopleRepository>(create: (_) => PeopleRepository()),
-        ChangeNotifierProvider<ExpenseRepository>(create: (_) => ExpenseRepository()),
-        ChangeNotifierProvider<DashboardProvider>(
+        ChangeNotifierProvider(create: (_) => BillRepository()),
+        ChangeNotifierProvider(create: (_) => InventoryRepository()),
+        ChangeNotifierProvider(create: (_) => PeopleRepository()),
+        ChangeNotifierProvider(create: (_) => ExpenseRepository()),
+        ChangeNotifierProvider(
           create: (context) => DashboardProvider(
             billRepo: Provider.of<BillRepository>(context, listen: false),
-            inventoryRepo: Provider.of<InventoryRepository>(context, listen: false),
+            inventoryRepo: Provider.of<InventoryRepository>(
+              context,
+              listen: false,
+            ),
             peopleRepo: Provider.of<PeopleRepository>(context, listen: false),
             expenseRepo: Provider.of<ExpenseRepository>(context, listen: false),
+            userId: FirebaseAuth.instance.currentUser?.uid,
           ),
         ),
       ],
       child: Consumer<DashboardProvider>(
         builder: (context, provider, _) {
-          if (provider.isLoading) {
-            return Scaffold(
-              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              body: const Center(child: CircularProgressIndicator()),
-            );
-          }
-          if (provider.hasError) {
-            return Scaffold(
-              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              body: Center(
-                child: Text(
-                  'Error: ',
-                  style: Theme.of(context).textTheme.bodyMedium,
+          if (provider.errorMessage != null &&
+              provider.errorMessage!.isNotEmpty) {
+            return WillPopScope(
+              onWillPop: () async {
+                final shouldExit = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Exit App'),
+                    content: const Text(
+                      'Are you sure you want to exit the app?',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Exit'),
+                      ),
+                    ],
+                  ),
+                );
+                return shouldExit ?? false;
+              },
+              child: Scaffold(
+                backgroundColor: isDark
+                    ? const Color(0xFF0F0F0F)
+                    : Theme.of(context).scaffoldBackgroundColor,
+                body: Center(
+                  child: Text(
+                    'Error: ',
+                    style: TextStyle(color: Color(0xFF0A2342)),
+                  ),
                 ),
               ),
             );
           }
-          return Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            extendBody: true,
-            appBar: PreferredSize(
-              preferredSize: const Size.fromHeight(70),
-              child: AppBar(
-                backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-                elevation: 0,
-                centerTitle: false,
-                title: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: blueGradient,
-                      ),
-                      child: Icon(
-                        Icons.dashboard,
-                        color: Theme.of(context).colorScheme.onPrimary,
-                        size: 28,
-                      ),
+          // Wrap main Scaffold in WillPopScope for exit confirmation
+          return WillPopScope(
+            onWillPop: () async {
+              final shouldExit = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Exit App'),
+                  content: const Text('Are you sure you want to exit the app?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
                     ),
-                    const SizedBox(width: 14),
-                    Text(
-                      "Dashboard",
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 22),
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Exit'),
                     ),
                   ],
                 ),
-                actions: [
-                  Stack(
+              );
+              return shouldExit ?? false;
+            },
+            child: Scaffold(
+              backgroundColor: isDark
+                  ? const Color(0xFF0A2342)
+                  : Theme.of(context).scaffoldBackgroundColor,
+              extendBody: true,
+              appBar: PreferredSize(
+                preferredSize: const Size.fromHeight(70),
+                child: AppBar(
+                  backgroundColor: isDark
+                      ? const Color(0xFF0A2342)
+                      : Theme.of(context).scaffoldBackgroundColor,
+                  elevation: 0,
+                  centerTitle: false,
+                  title: Row(
                     children: [
-                      IconButton(
-                        icon: Icon(
-                          Icons.notifications_none,
-                          color: darkBlue,
+                      // Dashboard icon (static)
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: blueGradient,
+                        ),
+                        child: const Icon(
+                          Icons.dashboard,
+                          color: Colors.white,
                           size: 28,
                         ),
-                        onPressed: () {},
                       ),
-                      if (notificationCount > 0)
-                        Positioned(
-                          right: 10,
-                          top: 10,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '$notificationCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
+                      const SizedBox(width: 14),
+                      Text(
+                        "Dashboard",
+                        style: GoogleFonts.poppins(
+                          color: isDark ? Colors.white : darkBlue,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                          letterSpacing: 0.5,
                         ),
+                      ),
                     ],
                   ),
-                ],
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(
-                    bottom: Radius.circular(24),
-                  ),
-                ),
-              ),
-            ),
-            body: RefreshIndicator(
-              onRefresh: () async {
-                final provider = Provider.of<DashboardProvider>(
-                  context,
-                  listen: false,
-                );
-                await provider.refreshData();
-                // Optionally refresh people as well
-                await _fetchAllPeople();
-              },
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  const SizedBox(height: 10),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment:
-                                CrossAxisAlignment.center, // align with icon
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        "WELCOME",
-                                        style: GoogleFonts.montserrat(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.grey[600],
-                                          letterSpacing: 2.2,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '👋',
-                                        style: TextStyle(fontSize: 18),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    userName,
-                                    style: GoogleFonts.urbanist(
-                                      fontSize: 24, // reduced from 30
-                                      fontWeight: FontWeight.w900,
-                                      color: const Color(0xFF1976D2),
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              // Account icon (blue, vertically centered)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  // Account icon with dropdown
-                                  PopupMenuButton<int>(
-                                    icon: userPhoto != null
-                                        ? CircleAvatar(
-                                            backgroundImage: NetworkImage(userPhoto!),
-                                            radius: 16,
-                                          )
-                                        : const Icon(Icons.account_circle_rounded, color: Color(0xFF1976D2), size: 28),
-                                    itemBuilder: (context) => [
-                                      PopupMenuItem(
-                                        enabled: false,
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            if (userPhoto != null)
-                                              CircleAvatar(
-                                                backgroundImage: NetworkImage(userPhoto!),
-                                                radius: 24,
-                                              ),
-                                            if (userPhoto != null) const SizedBox(height: 8),
-                                            Text(userName, style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-                                            Text(userEmail, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[700])),
-                                          ],
-                                  ),
-                                      ),
-                                      const PopupMenuDivider(),
-                                      PopupMenuItem(
-                                        value: 1,
-                                        child: Row(
-                                          children: [
-                                            const Icon(Icons.logout, color: Color(0xFF1976D2), size: 20),
-                                            const SizedBox(width: 8),
-                                            Text('Logout', style: GoogleFonts.poppins(color: Color(0xFF1976D2))),
-                                          ],
-                                    ),
-                                      ),
-                                    ],
-                                    onSelected: (value) async {
-                                      if (value == 1) {
-                                        await FirebaseAuth.instance.signOut();
-                                        if (mounted) {
-                                          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-                                        }
-                                      }
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Total Balance Card (use dark blue gradient)
-                        Container(
-                          decoration: BoxDecoration(
-                            gradient:
-                                blueGradient, // Use the dark blue gradient
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 16,
-                                offset: const Offset(0, 6),
-                              ),
-                            ],
-                            backgroundBlendMode: BlendMode.srcOver,
-                          ),
-                          padding: const EdgeInsets.all(20),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.account_balance_wallet,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        "Total Balance",
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.white70,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      'Rs ' +
-                                          formatIndianAmount(
-                                            provider.totalProfit,
-                                          ),
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.white,
-                                        fontSize: 28,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.pushNamed(context, '/reports');
-                                },
-                                child: Text(
-                                "See details",
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                    decoration: TextDecoration.underline,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-
-                        // Stat Cards Grid (revert to original white card style)
-                        GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 2.2,
+                  actions: [
+                    BlocBuilder<NotificationCubit, NotificationState>(
+                      builder: (context, state) {
+                        int unreadCount = 0;
+                        if (state is NotificationLoaded) {
+                          unreadCount = state.notifications
+                              .where((n) => !n.isRead)
+                              .length;
+                        }
+                        return Stack(
                           children: [
-                            // Sales
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(
+                            IconButton(
+                              icon: Icon(
+                                unreadCount > 0
+                                    ? Icons.notifications
+                                    : Icons.notifications_none,
+                                color: isDark ? Colors.white : darkBlue,
+                                size: 28,
+                              ),
+                              onPressed: () {
+                                Navigator.push(
                                   context,
-                                  '/reports',
-                                  arguments: {'selectedDetailedReport': 'sales'},
+                                  MaterialPageRoute(
+                                    builder: (_) => const NotificationScreen(),
+                                  ),
                                 );
                               },
-                              child: _statCard(
-                                Icons.shopping_cart_rounded,
-                                "Sales",
-                                provider.totalSales,
-                                provider.salesChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Color(0xFF1976D2),
-                              ),
                             ),
-                            // Purchase
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/reports',
-                                  arguments: {'selectedDetailedReport': 'purchase'},
-                                );
-                              },
-                              child: _statCard(
-                                Icons.inventory_2,
-                                "Purchase",
-                                provider.totalPurchase,
-                                provider.purchaseChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Color(0xFF128C7E),
-                              ),
-                            ),
-                            // People
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/reports',
-                                  arguments: {'selectedDetailedReport': 'people'},
-                                );
-                              },
-                              child: _statCard(
-                                Icons.people_rounded,
-                                "People",
-                                provider.customerCount,
-                                provider.peopleChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Colors.blue,
-                              ),
-                            ),
-                            // Expense
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/reports',
-                                  arguments: {'selectedDetailedReport': 'expense'},
-                                );
-                              },
-                              child: _statCard(
-                                Icons.money_off,
-                                "Expense",
-                                provider.totalExpense,
-                                provider.expenseChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Colors.red,
-                              ),
-                            ),
-                            // Profit
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(context, '/reports');
-                              },
-                              child: _statCard(
-                                Icons.trending_up_rounded,
-                                "Profit",
-                                provider.totalSales - provider.totalExpense,
-                                provider.profitChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Color(0xFF10B981),
-                              ),
-                            ),
-                            // Inventory
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(context, '/inventory');
-                              },
-                              child: _statCard(
-                                Icons.store_rounded,
-                                "Inventory",
-                                provider.allInventory.length,
-                                provider.inventoryChange,
-                                Colors.white,
-                                gradient: null,
-                                textColor: Colors.black,
-                                iconColor: Colors.deepPurple,
-                              ),
-                            ),
-                          ],
-                        ),
-                        // No extra spacing here
-
-                        // Reduce spacing between recent people avatars and menu grid
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 2,
-                            horizontal: 8,
-                          ),
-                          child: _menuGrid(context),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Sales vs Purchase Comparison Chart
-                        Text(
-                          "Sales vs Purchase Comparison",
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Add filter bar above and outside the graph container
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 6,
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _buildGraphFilterButton('daily', 'Daily'),
-                              const SizedBox(width: 6),
-                              _buildGraphFilterButton('weekly', 'Weekly'),
-                              const SizedBox(width: 6),
-                              _buildGraphFilterButton('monthly', 'Monthly'),
-                            ],
-                          ),
-                        ),
-                        // Graph container: increase width, reduce horizontal margin/padding, reduce height
-                        Container(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 2,
-                          ), // Reduced margin
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0xFFF8FBFF), Color(0xFFEAF1FB)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 8,
-                          ), // Reduced padding
-                          width:
-                              MediaQuery.of(context).size.width -
-                              8, // Wider graph
-                          height: 260, // Slightly reduced height
-                          child: ComparisonChartWidget(
-                            salesData: _getSalesData(provider),
-                            purchaseData: _getPurchaseData(provider),
-                            labels: _getGraphLabels(),
-                            salesColor: Color(0xFF1976D2),
-                            purchaseColor: Color(0xFF128C7E),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Add Top 5 Sales section
-                        Text(
-                          "Recent Activity",
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        StreamBuilder<List<Activity>>(
-                          stream: ActivityRepository().getRecentActivitiesStream(limit: 30),
-                          builder: (context, snapshot) {
-                            if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                              return Center(
-                                child: Text(
-                                  'No recent activity',
-                                  style: GoogleFonts.poppins(fontSize: 13),
+                            if (unreadCount > 0)
+                              Positioned(
+                                right: 10,
+                                top: 10,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    '$unreadCount',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
-                              );
-                            }
-                            final activities = snapshot.data!;
-                            return ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: activities.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 6),
-                              itemBuilder: (context, idx) {
-                                final act = activities[idx];
-                                final icon = getActivityIcon(
-                                  act.type,
-                                  act.metadata,
-                                );
-                                Color color = const Color(
-                                  0xFF1976D2,
-                                ); // Always blue for all activity types
-                                switch (act.type) {
-                                  case 'sale':
-                                    color = Colors.blue;
-                                    break;
-                                  case 'purchase':
-                                    color = Colors.green;
-                                    break;
-                                  case 'people_add':
-                                    color = Colors.teal;
-                                    break;
-                                  case 'people_edit':
-                                    color = Colors.orange;
-                                    break;
-                                  case 'people_delete':
-                                    color = Colors.red;
-                                    break;
-                                  case 'expense_add':
-                                    color = Colors.redAccent;
-                                    break;
-                                  case 'expense_edit':
-                                    color = Colors.orange;
-                                    break;
-                                  case 'expense_delete':
-                                    color = Colors.red;
-                                    break;
-                                  default:
-                                    color = Colors.grey;
-                                }
-                                return Container(
-                                  margin: const EdgeInsets.symmetric(
-                                    vertical: 1,
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    // Account menu moved to actions with enhanced dropdown
+                    PopupMenuButton<String>(
+                      tooltip: 'Account',
+                      position: PopupMenuPosition.under,
+                      offset: const Offset(0, 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          enabled: false,
+                          child: FutureBuilder<User?>(
+                            future: Future.value(
+                              FirebaseAuth.instance.currentUser,
+                            ),
+                            builder: (context, snapshot) {
+                              String displayName = 'User';
+                              String userEmail = '';
+                              String? photoUrl;
+                              if (snapshot.hasData && snapshot.data != null) {
+                                final user = snapshot.data!;
+                                displayName =
+                                    user.displayName ??
+                                    user.email?.split('@').first ??
+                                    'User';
+                                userEmail = user.email ?? '';
+                                photoUrl = user.photoURL;
+                              }
+                              return Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 20,
+                                    backgroundColor: isDark
+                                        ? Colors.white24
+                                        : darkBlue,
+                                    backgroundImage: photoUrl != null
+                                        ? NetworkImage(photoUrl)
+                                        : null,
+                                    child: photoUrl == null
+                                        ? Icon(
+                                            Icons.person,
+                                            color: Colors.white,
+                                          )
+                                        : null,
                                   ),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: color.withOpacity(0.07),
-                                        blurRadius: 6,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                    border: Border(
-                                      left: BorderSide(color: color, width: 4),
-                                    ),
-                                    color: Theme.of(context).cardColor,
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    child: Row(
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        // Icon
-                                        Container(
-                                          width: 36,
-                                          height: 36,
-                                          margin: const EdgeInsets.only(
-                                            right: 10,
-                                            top: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: [
-                                                Color(0xFF1976D2),
-                                                Color(0xFF42A5F5),
-                                              ], // blue for sales
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            shape: BoxShape.circle,
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withOpacity(
-                                                  0.10,
-                                                ),
-                                                blurRadius: 6,
-                                                offset: Offset(0, 2),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Icon(
-                                            icon,
-                                            color:
-                                                Colors.white, // Set icon color
-                                            size: 18,
+                                        Text(
+                                          displayName,
+                                          style: GoogleFonts.poppins(
+                                            fontWeight: FontWeight.w700,
+                                            color: isDark
+                                                ? Colors.white
+                                                : darkBlue,
                                           ),
                                         ),
-                                        // Main content
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              // First row: Activity type (bold) and date/time (right)
-                                              Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      _getActivityTypeLabel(
-                                                        act.type,
-                                                      ),
-                                                      style: GoogleFonts.poppins(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontSize: 13.5,
-                                                        color:
-                                                            _getActivityTextColor(
-                                                              act.type,
-                                                            ),
-                                                        letterSpacing: 0.2,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    DateFormat(
-                                                      'dd MMM, hh:mm a',
-                                                    ).format(act.timestamp),
-                                                    style: GoogleFonts.poppins(
-                                                      fontSize: 11,
-                                                      color: Colors.grey[600],
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              // Second row: Description (left) and Amount (right, if present)
-                                              Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.end,
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      act.description,
-                                                      style:
-                                                          GoogleFonts.poppins(
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                            fontSize: 12.5,
-                                                            color: const Color(
-                                                              0xFF1976D2,
-                                                            ),
-                                                          ),
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                  if (act.metadata != null &&
-                                                      act.metadata!['amount'] !=
-                                                          null)
-                                                    Padding(
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                            left: 8,
-                                                          ),
-                                                      child: Text(
-                                                        'Rs ${act.metadata!['amount']}',
-                                                        style: GoogleFonts.poppins(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 12.5,
-                                                          color:
-                                                              _getActivityTextColor(
-                                                                act.type,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ],
+                                        Text(
+                                          userEmail,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : Colors.grey[700],
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                );
-                              },
-                            );
-                          },
+                                ],
+                              );
+                            },
+                          ),
                         ),
-                        // Add extra space so nothing is hidden behind the BottomAppBar
-                        const SizedBox(height: 80),
-                        const SizedBox(height: 24),
+                        const PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'logout',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.logout,
+                                color: isDark ? Colors.white : darkBlue,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Logout',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.white : darkBlue,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
+                      onSelected: (value) async {
+                        if (value == 'logout') {
+                          try {
+                            await FirebaseAuth.instance.signOut();
+                          } catch (_) {}
+                          try {
+                            final google = GoogleSignIn();
+                            await google.signOut();
+                            await google.disconnect();
+                          } catch (_) {}
+                          await clearUserUid();
+                          if (mounted) {
+                            Navigator.of(context).pushNamedAndRemoveUntil(
+                              '/login',
+                              (route) => false,
+                            );
+                          }
+                        }
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isDark ? Colors.white12 : Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.06),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.account_circle,
+                          color: isDark ? Colors.white : darkBlue,
+                          size: 26,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(24),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-            floatingActionButton: SizedBox(
-              height: 48,
-              width: 48,
-              child: FloatingActionButton(
-                backgroundColor: const Color(0xFF1976D2),
-                elevation: 8,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.calculate,
-                  color: Colors.white,
-                  size: 24,
-                ),
-                onPressed: () async {
-                  await Navigator.pushNamed(context, '/calculator');
+              body: RefreshIndicator(
+                onRefresh: () async {
+                  // DashboardProvider auto-refreshes via streams; no manual refresh needed.
                 },
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.center, // align with icon
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          "WELCOME",
+                                          style: GoogleFonts.montserrat(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.grey[600],
+                                            letterSpacing: 2.2,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '👋',
+                                          style: TextStyle(fontSize: 18),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    FutureBuilder<User?>(
+                                      future: Future.value(
+                                        FirebaseAuth.instance.currentUser,
+                                      ),
+                                      builder: (context, snapshot) {
+                                        final items = provider.inventory;
+
+                                        String displayName = 'User';
+                                        String userEmail = '';
+
+                                        if (snapshot.hasData &&
+                                            snapshot.data != null) {
+                                          final user = snapshot.data!;
+                                          displayName =
+                                              user.displayName ??
+                                              user.email?.split('@').first ??
+                                              'User';
+                                          userEmail = user.email ?? '';
+                                        }
+
+                                        return Text(
+                                          displayName,
+                                          style: GoogleFonts.urbanist(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.w900,
+                                            color: const Color(0xFF1976D2),
+                                            letterSpacing: 0.5,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                // Removed profile icon menu from right side; menu is now on the dashboard icon.
+                              ],
+                            ),
+                          ),
+                          // Total Balance Card (robust, real-time: sales - purchases - expenses + sum(positive people) - sum(abs(negative people)))
+                          StreamBuilder<List<Bill>>(
+                            stream: provider.billRepo.streamBills(
+                              FirebaseAuth.instance.currentUser?.uid ?? '',
+                            ),
+                            builder: (context, billSnapshot) {
+                              final bills = billSnapshot.data ?? [];
+                              final totalSales = bills.fold(
+                                0.0,
+                                (sum, b) => sum + b.total,
+                              );
+                              return StreamBuilder<List<InventoryItem>>(
+                                // Use provider-managed inventory
+                                stream:
+                                    null, // Removed direct repository stream
+                                builder: (context, inventorySnapshot) {
+                                  final items = inventorySnapshot.data ?? [];
+                                  final totalPurchases = items.fold(
+                                    0.0,
+                                    (sum, item) =>
+                                        sum + (item.price * item.quantity),
+                                  );
+                                  return StreamBuilder<List<Expense>>(
+                                    stream: provider.expenseRepo.streamExpenses(
+                                      FirebaseAuth.instance.currentUser?.uid ??
+                                          '',
+                                    ),
+                                    builder: (context, expenseSnapshot) {
+                                      final expenses =
+                                          expenseSnapshot.data ?? [];
+                                      final totalExpenses = expenses.fold(
+                                        0.0,
+                                        (sum, e) => sum + (e.amount ?? 0.0),
+                                      );
+                                      return StreamBuilder<List<People>>(
+                                        stream: provider.peopleRepo
+                                            .getPeopleStream(
+                                              FirebaseAuth
+                                                      .instance
+                                                      .currentUser
+                                                      ?.uid ??
+                                                  '',
+                                            ),
+                                        builder: (context, peopleSnapshot) {
+                                          final people =
+                                              peopleSnapshot.data ?? [];
+                                          final peoplePositive = people
+                                              .where((p) => p.balance > 0)
+                                              .fold(
+                                                0.0,
+                                                (sum, p) => sum + p.balance,
+                                              );
+                                          final peopleNegative = people
+                                              .where((p) => p.balance < 0)
+                                              .fold(
+                                                0.0,
+                                                (sum, p) =>
+                                                    sum + p.balance.abs(),
+                                              );
+                                          final totalBalance =
+                                              totalSales -
+                                              totalPurchases -
+                                              totalExpenses +
+                                              peoplePositive -
+                                              peopleNegative;
+                                          return Container(
+                                            decoration: BoxDecoration(
+                                              gradient: blueGradient,
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.08),
+                                                  blurRadius: 16,
+                                                  offset: const Offset(0, 6),
+                                                ),
+                                              ],
+                                              backgroundBlendMode:
+                                                  BlendMode.srcOver,
+                                            ),
+                                            padding: const EdgeInsets.all(20),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        const Icon(
+                                                          Icons
+                                                              .account_balance_wallet,
+                                                          color: Colors.white,
+                                                          size: 22,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 8,
+                                                        ),
+                                                        Text(
+                                                          "Total Balance",
+                                                          style:
+                                                              GoogleFonts.poppins(
+                                                                color: Colors
+                                                                    .white70,
+                                                                fontSize: 15,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 10),
+                                                    FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      child: Text(
+                                                        'Rs ${formatIndianAmount(totalBalance)}',
+                                                        style:
+                                                            GoogleFonts.poppins(
+                                                              color:
+                                                                  Colors.white,
+                                                              fontSize: 28,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              letterSpacing:
+                                                                  0.5,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                InkWell(
+                                                  onTap: () {
+                                                    Navigator.pushNamed(
+                                                      context,
+                                                      '/reports',
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    "See details",
+                                                    style: GoogleFonts.poppins(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      decoration: TextDecoration
+                                                          .underline,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 18),
+
+                          // Stat Cards Grid (revert to original white card style)
+                          Container(
+                            height: 250,
+                            child: GridView.count(
+                              crossAxisCount: 2,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 2.2,
+                              children: [
+                                StreamBuilder<List<Bill>>(
+                                  stream: provider.billRepo.streamBills(
+                                    FirebaseAuth.instance.currentUser?.uid ??
+                                        '',
+                                  ),
+                                  builder: (context, snapshot) {
+                                    final items = provider.inventory;
+
+                                    final bills = snapshot.data ?? [];
+                                    final totalSales = bills.fold(
+                                      0.0,
+                                      (sum, b) => sum + b.total,
+                                    );
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/reports',
+                                          arguments: {
+                                            'selectedDetailedReport': 'sales',
+                                          },
+                                        );
+                                      },
+                                      child: _statCard(
+                                        Icons.shopping_cart_rounded,
+                                        "Sales",
+                                        totalSales,
+                                        isDark
+                                            ? const Color(0xFF013A63)
+                                            : const Color(
+                                                0xFFFFF7E6,
+                                              ), // light amber
+                                        gradient: null,
+                                        textColor: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                        iconColor: Color(0xFF1976D2),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                // Purchase Stat Card (real-time)
+                                StreamBuilder<List<InventoryItem>>(
+                                  // Use provider-managed inventory
+                                  stream:
+                                      null, // Removed direct repository stream
+                                  builder: (context, snapshot) {
+                                    final items = provider.inventory;
+
+                                    final totalPurchase = items.fold(
+                                      0.0,
+                                      (sum, item) =>
+                                          sum +
+                                          ((item.price) * (item.quantity)),
+                                    );
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/reports',
+                                          arguments: {
+                                            'selectedDetailedReport':
+                                                'purchase',
+                                          },
+                                        );
+                                      },
+                                      child: _statCard(
+                                        Icons.inventory_2,
+                                        "Purchase",
+                                        totalPurchase,
+                                        isDark
+                                            ? const Color(0xFF013A63)
+                                            : const Color(
+                                                0xFFE8F5E9,
+                                              ), // light green
+                                        gradient: null,
+                                        textColor: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                        iconColor: Color(0xFF128C7E),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                // Row 2: People, Expense
+                                // People Stat Card (real-time)
+                                StreamBuilder<List<People>>(
+                                  stream: provider.peopleRepo.getPeopleStream(
+                                    FirebaseAuth.instance.currentUser?.uid ??
+                                        '',
+                                  ),
+                                  builder: (context, snapshot) {
+                                    final items = provider.inventory;
+
+                                    final people = snapshot.data ?? [];
+                                    final customerCount = people
+                                        .where((p) => p.category == 'customer')
+                                        .length;
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/reports',
+                                          arguments: {
+                                            'selectedDetailedReport': 'people',
+                                          },
+                                        );
+                                      },
+                                      child: _statCard(
+                                        Icons.people_rounded,
+                                        "People",
+                                        customerCount,
+                                        isDark
+                                            ? const Color(0xFF013A63)
+                                            : const Color(
+                                                0xFFE3F2FD,
+                                              ), // light blue
+                                        gradient: null,
+                                        textColor: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                        iconColor: Colors.blue,
+                                      ),
+                                    );
+                                  },
+                                ),
+                                // Expense Stat Card (real-time)
+                                StreamBuilder<List<Expense>>(
+                                  stream: provider.expenseRepo.streamExpenses(
+                                    FirebaseAuth.instance.currentUser?.uid ??
+                                        '',
+                                  ),
+                                  builder: (context, snapshot) {
+                                    final items = provider.inventory;
+
+                                    final expenses = snapshot.data ?? [];
+                                    final totalExpense = expenses.fold(
+                                      0.0,
+                                      (sum, e) => sum + (e.amount ?? 0.0),
+                                    );
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/reports',
+                                          arguments: {
+                                            'selectedDetailedReport': 'expense',
+                                          },
+                                        );
+                                      },
+                                      child: _statCard(
+                                        Icons.money_off,
+                                        "Expense",
+                                        totalExpense,
+                                        isDark
+                                            ? const Color(0xFF013A63)
+                                            : const Color(
+                                                0xFFFFEBEE,
+                                              ), // light red
+                                        gradient: null,
+                                        textColor: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                        iconColor: Colors.red,
+                                      ),
+                                    );
+                                  },
+                                ),
+                                // Row 3: Profit
+                                // Profit Stat Card (real-time: Sales - Expenses)
+                                StreamBuilder<List<Bill>>(
+                                  stream: provider.billRepo.streamBills(
+                                    FirebaseAuth.instance.currentUser?.uid ??
+                                        '',
+                                  ),
+                                  builder: (context, billSnapshot) {
+                                    final bills = billSnapshot.data ?? [];
+                                    final totalSales = bills.fold(
+                                      0.0,
+                                      (sum, b) => sum + b.total,
+                                    );
+                                    return StreamBuilder<List<Expense>>(
+                                      stream: provider.expenseRepo
+                                          .streamExpenses(
+                                            FirebaseAuth
+                                                    .instance
+                                                    .currentUser
+                                                    ?.uid ??
+                                                '',
+                                          ),
+                                      builder: (context, expenseSnapshot) {
+                                        final expenses =
+                                            expenseSnapshot.data ?? [];
+                                        final totalExpense = expenses.fold(
+                                          0.0,
+                                          (sum, e) => sum + (e.amount ?? 0.0),
+                                        );
+                                        final profit =
+                                            totalSales - totalExpense;
+                                        return GestureDetector(
+                                          onTap: () {
+                                            Navigator.pushNamed(
+                                              context,
+                                              '/reports',
+                                            );
+                                          },
+                                          child: _statCard(
+                                            Icons.trending_up_rounded,
+                                            "Profit",
+                                            profit,
+                                            isDark
+                                                ? const Color(0xFF013A63)
+                                                : const Color(
+                                                    0xFFE8F5E9,
+                                                  ), // light green
+                                            gradient: null,
+                                            textColor: isDark
+                                                ? Colors.white
+                                                : Colors.black,
+                                            iconColor: Color(0xFF10B981),
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                                // Row 4: Inventory
+                                // Inventory Stat Card (real-time)
+                                StreamBuilder<List<InventoryItem>>(
+                                  // Use provider-managed inventory
+                                  stream:
+                                      null, // Removed direct repository stream
+                                  builder: (context, snapshot) {
+                                    final items = provider.inventory;
+
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/reports',
+                                          arguments: {
+                                            'selectedDetailedReport':
+                                                'purchase',
+                                          },
+                                        );
+                                      },
+                                      child: _statCard(
+                                        Icons.store_rounded,
+                                        "Inventory",
+                                        items.length,
+                                        isDark
+                                            ? const Color(0xFF013A63)
+                                            : const Color(
+                                                0xFFF3E5F5,
+                                              ), // light purple
+                                        gradient: null,
+                                        textColor: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                        iconColor: Colors.deepPurple,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+                          // Quick Links Heading
+                          Align(
+                            alignment: Alignment.center,
+                            child: Text(
+                              "Quick Links",
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isDark ? Color(0xFF0A2342) : Colors.white,
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 2,
+                              horizontal: 8,
+                            ),
+                            child: _menuGrid(context, isDark),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Sales vs Purchase Comparison Chart
+                          Text(
+                            "Sales vs Purchase Comparison",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          // Add filter bar above and outside the graph container
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 6,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _buildGraphFilterButton('daily', 'Daily'),
+                                const SizedBox(width: 6),
+                                _buildGraphFilterButton('weekly', 'Weekly'),
+                                const SizedBox(width: 6),
+                                _buildGraphFilterButton('monthly', 'Monthly'),
+                              ],
+                            ),
+                          ),
+                          // Graph container: increase width, reduce horizontal margin/padding, reduce height
+                          Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 2,
+                            ), // Reduced margin
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFFF8FBFF), Color(0xFFEAF1FB)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ), // Reduced padding
+                            width:
+                                MediaQuery.of(context).size.width -
+                                8, // Wider graph
+                            height: 260, // Slightly reduced height
+                            child: ComparisonChartWidget(
+                              salesData: _getSalesData(provider),
+                              purchaseData: _getPurchaseData(provider),
+                              labels: _getGraphLabels(),
+                              salesColor: Color(0xFF1976D2),
+                              purchaseColor: Color(0xFF128C7E),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Add Top 5 Sales section
+                          Text(
+                            "Recent Activity",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          StreamBuilder<List<Activity>>(
+                            stream: ActivityRepository()
+                                .getRecentActivitiesStream(
+                                  userId:
+                                      FirebaseAuth.instance.currentUser?.uid ??
+                                      '',
+                                  limit: 30,
+                                ),
+                            builder: (context, snapshot) {
+                              final items = provider.inventory;
+
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              }
+                              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                                return Center(
+                                  child: Text(
+                                    'No recent activity',
+                                    style: GoogleFonts.poppins(fontSize: 13),
+                                  ),
+                                );
+                              }
+                              final activities = snapshot.data!;
+                              return ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: activities.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 6),
+                                itemBuilder: (context, idx) {
+                                  final act = activities[idx];
+                                  final icon = getActivityIcon(
+                                    act.type,
+                                    act.metadata,
+                                  );
+                                  Color color = const Color(
+                                    0xFF1976D2,
+                                  ); // Always blue for all activity types
+                                  switch (act.type) {
+                                    case 'sale':
+                                      color = isDark
+                                          ? Colors.black
+                                          : Colors.blue;
+                                      break;
+                                    case 'purchase':
+                                      color = Colors.green;
+                                      break;
+                                    case 'people_add':
+                                      color = Colors.teal;
+                                      break;
+                                    case 'people_edit':
+                                      color = Colors.orange;
+                                      break;
+                                    case 'people_delete':
+                                      color = Colors.red;
+                                      break;
+                                    case 'expense_add':
+                                      color = Colors.redAccent;
+                                      break;
+                                    case 'expense_edit':
+                                      color = Colors.orange;
+                                      break;
+                                    case 'expense_delete':
+                                      color = Colors.red;
+                                      break;
+                                    default:
+                                      color = Colors.grey;
+                                  }
+                                  return Container(
+                                    margin: const EdgeInsets.symmetric(
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: color.withOpacity(0.07),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                      border: Border(
+                                        left: BorderSide(
+                                          color: color,
+                                          width: 4,
+                                        ),
+                                      ),
+                                      gradient: isDark
+                                          ? const LinearGradient(
+                                              colors: [
+                                                Color(0xFF0A2342),
+                                                Color(0xFF123060),
+                                                Color(0xFF1976D2),
+                                              ],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            )
+                                          : null,
+                                      color: isDark ? null : Colors.white,
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // Icon
+                                          Container(
+                                            width: 36,
+                                            height: 36,
+                                            margin: const EdgeInsets.only(
+                                              right: 10,
+                                              top: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [
+                                                  Color(0xFF1976D2),
+                                                  Color(0xFF42A5F5),
+                                                ], // blue for sales
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ),
+                                              shape: BoxShape.circle,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.13),
+                                                  blurRadius: 16,
+                                                  offset: Offset(0, 6),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Icon(
+                                              icon,
+                                              color: Colors
+                                                  .white, // Set icon color
+                                              size: 18,
+                                            ),
+                                          ),
+                                          // Main content
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                // First row: Activity type (bold) and date/time (right)
+                                                Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        _getActivityTypeLabel(
+                                                          act.type,
+                                                        ),
+                                                        style: GoogleFonts.poppins(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 13.5,
+                                                          color:
+                                                              _getActivityTextColor(
+                                                                act.type,
+                                                              ),
+                                                          letterSpacing: 0.2,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      DateFormat(
+                                                        'dd MMM, hh:mm a',
+                                                      ).format(act.timestamp),
+                                                      style: GoogleFonts.poppins(
+                                                        fontSize: 11,
+                                                        color: isDark
+                                                            ? Colors.white
+                                                            : Colors.grey[600],
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 2),
+                                                // Second row: Description (left) and Amount (right, if present)
+                                                Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.end,
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        act.description,
+                                                        style:
+                                                            GoogleFonts.poppins(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                              fontSize: 12.5,
+                                                              color:
+                                                                  const Color(
+                                                                    0xFF1976D2,
+                                                                  ),
+                                                            ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ),
+                                                    if (act.metadata != null &&
+                                                        act.metadata!['amount'] !=
+                                                            null)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              left: 8,
+                                                            ),
+                                                        child: Text(
+                                                          'Rs ${act.metadata!['amount']}',
+                                                          style: GoogleFonts.poppins(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 12.5,
+                                                            color:
+                                                                _getActivityTextColor(
+                                                                  act.type,
+                                                                ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                          // Add extra space so nothing is hidden behind the BottomAppBar
+                          const SizedBox(height: 80),
+                          const SizedBox(height: 24),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              floatingActionButton: SizedBox(
+                height: 48,
+                width: 48,
+                child: FloatingActionButton(
+                  backgroundColor: const Color(0xFF1976D2),
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.calculate,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                  onPressed: () async {
+                    await Navigator.pushNamed(context, '/calculator');
+                  },
+                ),
+              ),
+              floatingActionButtonLocation:
+                  FloatingActionButtonLocation.centerDocked,
+              bottomNavigationBar: _modernBottomAppBar(context),
             ),
-            floatingActionButtonLocation:
-                FloatingActionButtonLocation.centerDocked,
-            bottomNavigationBar: _modernBottomAppBar(),
           );
         },
       ),
@@ -1222,17 +1412,11 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     IconData icon,
     String label,
     num value,
-    double change,
     Color color, {
     Gradient? gradient,
     Color textColor = Colors.black,
     Color iconColor = Colors.blue,
   }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF232A36) : color;
-    final effectiveTextColor = isDark ? Colors.white : textColor;
-    final effectiveIconColor = isDark ? Colors.white : iconColor;
-    final isUp = change >= 0;
     return Container(
       constraints: const BoxConstraints(
         minWidth: 120,
@@ -1241,73 +1425,84 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         maxHeight: 70,
       ),
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(18),
+        color: color,
+        borderRadius: BorderRadius.circular(6),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
+            color: Colors.black.withOpacity(0),
+            blurRadius: 4,
+            spreadRadius: 0.5,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: effectiveIconColor.withOpacity(0.13),
-            child: Icon(icon, color: effectiveIconColor, size: 20),
-            radius: 18,
+          Container(
+            width: 44,
+            height: 44,
+            margin: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.9),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: iconColor.withOpacity(0.15),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: iconColor, size: 22),
           ),
-          const SizedBox(width: 8),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
                   style: GoogleFonts.poppins(
                     fontSize: 13,
-                    color: effectiveTextColor.withOpacity(0.7),
+                    color: textColor.withOpacity(0.7),
                     fontWeight: FontWeight.w500,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  value.toString(),
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: effectiveTextColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Monetary labels where we want currency formatting
+                    final lower = label.toLowerCase();
+                    final isMoney =
+                        lower.contains('sale') ||
+                        lower.contains('purchase') ||
+                        lower.contains('expense') ||
+                        lower.contains('profit');
+
+                    final String display = isMoney
+                        ? 'Rs ${formatIndianAmount(value)}'
+                        : NumberFormat.compact().format(value);
+
+                    return FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        display,
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: textColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
-          ),
-          const SizedBox(width: 4),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                isUp ? Icons.arrow_upward : Icons.arrow_downward,
-                color: isUp ? Colors.greenAccent : Colors.redAccent,
-                size: 14,
-              ),
-              Text(
-                "${(change.abs() * 100).toStringAsFixed(0)}%",
-                style: GoogleFonts.poppins(
-                  color: isUp ? Colors.greenAccent : Colors.redAccent,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
           ),
         ],
       ),
@@ -1315,217 +1510,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   // Transaction tile widget
-  Widget _transactionTile(Map txn) {
-    // Determine icon and color based on transaction type or status
-    IconData icon = Icons.receipt_long;
-    Color iconColor = const Color(0xFF1976D2); // blue
-    if ((txn["status"] ?? '').toLowerCase().contains('purchase')) {
-      icon = Icons.shopping_cart;
-      iconColor = Colors.green;
-    } else if ((txn["status"] ?? '').toLowerCase().contains('expense')) {
-      icon = Icons.money_off;
-      iconColor = Colors.redAccent;
-    } else if ((txn["status"] ?? '').toLowerCase().contains('sales') ||
-        (txn["status"] ?? '').toLowerCase().contains('fulfilled')) {
-      icon = Icons.point_of_sale;
-      iconColor = const Color(0xFF1976D2);
-    }
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF1976D2).withOpacity(0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Theme.of(context).dividerColor, width: 1.2),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        leading: CircleAvatar(
-          backgroundColor: iconColor.withOpacity(0.13),
-          radius: 22,
-          child: Icon(icon, color: iconColor, size: 22),
-        ),
-        title: Text(
-          txn["name"],
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
-        ),
-        subtitle: Text(txn["date"], style: GoogleFonts.poppins(fontSize: 13)),
-        trailing: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              txn["status"],
-              style: GoogleFonts.poppins(
-                color: iconColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
-              ),
-            ),
-            Text(
-              txn["txn"],
-              style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Add this widget for recent people avatars
-  Widget _recentPeopleAvatars(List<People> people) {
-    // Group by category
-    final customers = people.where((p) => p.category == 'customer').toList();
-    final suppliers = people.where((p) => p.category == 'supplier').toList();
-    final others = people
-        .where((p) => p.category != 'customer' && p.category != 'supplier')
-        .toList();
-
-    Widget buildAvatar(People person) {
-      // Get initials (first and last name)
-      String initials = '?';
-      final nameParts = person.name.trim().split(' ');
-      if (nameParts.length == 1) {
-        initials = nameParts[0].isNotEmpty
-            ? nameParts[0][0].toUpperCase()
-            : '?';
-      } else if (nameParts.length > 1) {
-        initials =
-            nameParts[0][0].toUpperCase() + nameParts.last[0].toUpperCase();
-      }
-      Color bgColor;
-      switch (person.category) {
-        case 'customer':
-          bgColor = const Color(0xFF1976D2).withOpacity(0.15); // blue
-          break;
-        case 'supplier':
-          bgColor = const Color(0xFF43A047).withOpacity(0.15); // green
-          break;
-        case 'employee':
-          bgColor = const Color(0xFFF9A825).withOpacity(0.15); // yellow
-          break;
-        default:
-          bgColor = const Color(0xFF8E24AA).withOpacity(0.15); // purple
-      }
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 6),
-        width: 64,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: bgColor,
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            SizedBox(
-              width: 56,
-              child: Text(
-                person.name.split(' ').first,
-                style: GoogleFonts.poppins(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            SizedBox(
-              width: 56,
-              child: Text(
-                StringCasingExtension(person.category).capitalize(),
-                style: GoogleFonts.poppins(
-                  fontSize: 8,
-                  color: Colors.grey[600],
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 4),
-          ],
-        ),
-      );
-    }
-
-    List<Widget> buildSection(String label, List<People> group) {
-      if (group.isEmpty) return [];
-      return [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, top: 8, bottom: 2),
-          child: Text(
-            label,
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 84, // Increased height to allow for padding
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: group.take(10).map(buildAvatar).toList(),
-          ),
-        ),
-      ];
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2), // Minimized bottom padding
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Recent People',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pushNamed('/peoples');
-                },
-                child: Text(
-                  'See All',
-                  style: GoogleFonts.poppins(
-                    color: const Color(0xFF128C7E),
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          ...buildSection('Customers', customers),
-          ...buildSection('Suppliers', suppliers),
-          ...buildSection('Others', others),
-        ],
-      ),
-    );
-  }
 
   // Redesigned menu grid: two wide rectangle cards per row
-  Widget _menuGrid(BuildContext context) {
+  Widget _menuGrid(BuildContext context, bool isDark) {
     final menuItems = [
       {
         'icon': Icons.inventory_2,
@@ -1565,7 +1552,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       },
       {
         'icon': Icons.book,
-        'label': 'Digital Khaata',
+        'label': 'Khaata',
         // No navigation for Digital Khaata
         'color': Colors.orange,
       },
@@ -1577,107 +1564,86 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       },
     ];
 
-    return GridView.builder(
+    // New style: 4 columns, circular icons with label under (like Manage Orders)
+    return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 18,
-        crossAxisSpacing: 18,
-        childAspectRatio: 2.4, // Wider rectangle
-      ),
-      itemCount: menuItems.length,
-      itemBuilder: (context, index) {
-        final item = menuItems[index];
-        return InkWell(
-          onTap: () {
-            if (item['label'] == 'Digital Khaata') {
-              // Do nothing
-              return;
-            }
-            if (item.containsKey('route')) {
-              Navigator.pushNamed(context, item['route'] as String);
-            }
-          },
-          borderRadius: BorderRadius.circular(18),
-          child: Container(
-            height: 124, // Increased height
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.symmetric(
-              vertical: 10,
-              horizontal: 10,
-            ), // Reduced padding
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+      crossAxisCount: 4,
+      mainAxisSpacing: 14,
+      crossAxisSpacing: 8,
+      childAspectRatio: 0.8,
+      children: [
+        for (final item in menuItems)
+          InkWell(
+            onTap: () {
+              if (item['label'] == 'Digital Khaata') return; // no-op
+              if (item.containsKey('route')) {
+                Navigator.pushNamed(context, item['route'] as String);
+              }
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 CircleAvatar(
-                  backgroundColor: (item['color'] as Color).withOpacity(0.13),
-                  radius: 20, // Reduced icon size
+                  radius: 24,
+                  backgroundColor: (item['color'] as Color).withOpacity(0.15),
                   child: Icon(
                     item['icon'] as IconData,
-                    size: 20, // Reduced icon size
                     color: item['color'] as Color,
+                    size: 20,
                   ),
                 ),
-                const SizedBox(width: 8), // Reduced space between icon and text
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      item['label'] as String,
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: item['label'] == 'Digital Khaata' ? 2 : 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
+                const SizedBox(height: 8),
+                Text(
+                  item['label'] as String,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12.0,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : const Color(0xFF0A2342),
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
           ),
-        );
-      },
+      ],
     );
   }
 
   // Modern, stylish BottomAppBar
-  Widget _modernBottomAppBar() {
-    // Flat, white, minimal, blue icons, no shadow, no overflow
+  Widget _modernBottomAppBar(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return BottomAppBar(
       shape: const CircularNotchedRectangle(),
       notchMargin: 8,
       elevation: 0,
-      color: Theme.of(context).scaffoldBackgroundColor,
+      color: isDark ? Color(0xFF013A63) : Colors.white,
       child: SizedBox(
         height: 60,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             IconButton(
-              icon: const Icon(Icons.home, color: Color(0xFF1976D2), size: 28),
+              icon: Icon(
+                Icons.home,
+                color: isDark ? Colors.white : const Color(0xFF1976D2),
+                size: 24,
+              ),
               onPressed: () {
                 Navigator.pushReplacementNamed(context, '/home');
               },
               tooltip: 'Home',
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.point_of_sale_rounded,
-                color: Color(0xFF1976D2),
-                size: 28,
+                color: isDark ? Colors.white : const Color(0xFF1976D2),
+                size: 24,
               ),
               onPressed: () {
                 Navigator.pushNamed(context, '/sales');
@@ -1686,10 +1652,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
             ),
             const SizedBox(width: 48), // Space for FAB
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.shopping_cart_rounded,
-                color: Color(0xFF1976D2),
-                size: 28,
+                color: isDark ? Colors.white : const Color(0xFF1976D2),
+                size: 24,
               ),
               onPressed: () {
                 Navigator.pushNamed(context, '/purchase');
@@ -1697,10 +1663,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               tooltip: 'Purchase',
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.settings,
-                color: Color(0xFF1976D2),
-                size: 28,
+                color: isDark ? Colors.white : const Color(0xFF1976D2),
+                size: 24,
               ),
               onPressed: () {
                 Navigator.pushNamed(
@@ -1719,10 +1685,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   // Helper widget for Top 5 Sales
   Widget _topSalesList(DashboardProvider provider) {
     final productSales = <String, double>{};
-    for (final bill in provider.allBills) {
+    for (final bill in provider.bills) {
       for (final item in bill.items) {
-        productSales[item.name] =
-            (productSales[item.name] ?? 0) + (item.total ?? 0);
+        productSales[item.name] = (productSales[item.name] ?? 0) + item.total;
       }
     }
     final sorted = productSales.entries.toList()
@@ -1779,7 +1744,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   // Helper widget for Recent Purchases
   Widget _recentPurchasesList(DashboardProvider provider) {
-    final inventory = List<InventoryItem>.from(provider.allInventory);
+    final inventory = List<InventoryItem>.from(provider.inventory);
     inventory.sort(
       (a, b) =>
           (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)),
@@ -1843,7 +1808,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     final isSelected = _graphFilter == value;
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? const Color(0xFF1976D2) : Theme.of(context).cardColor,
+        backgroundColor: isSelected ? const Color(0xFF1976D2) : Colors.white,
         foregroundColor: isSelected ? Colors.white : const Color(0xFF1976D2),
         elevation: isSelected ? 2 : 0,
         shape: RoundedRectangleBorder(
@@ -1893,12 +1858,6 @@ IconData getActivityIcon(String type, Map<String, dynamic>? metadata) {
       return Icons.edit_document;
     case 'expense_delete':
       return Icons.delete_outline_rounded;
-    case 'inventory_add':
-      return Icons.add_box_rounded;
-    case 'inventory_edit':
-      return Icons.edit_rounded;
-    case 'inventory_delete':
-      return Icons.delete_outline_rounded;
     default:
       return Icons.info_outline_rounded;
   }
@@ -1938,6 +1897,12 @@ Color getActivityIconBgColor(String type) {
 // Add a helper to get a standardized activity type label
 String _getActivityTypeLabel(String type) {
   switch (type) {
+    case 'inventory_add':
+      return 'Inventory Added';
+    case 'inventory_edit':
+      return 'Inventory Edited';
+    case 'inventory_delete':
+      return 'Inventory Deleted';
     case 'sale_add':
       return 'Sale Created';
     case 'sale_delete':
@@ -1960,12 +1925,6 @@ String _getActivityTypeLabel(String type) {
       return 'Expense Edited';
     case 'expense_delete':
       return 'Expense Deleted';
-    case 'inventory_add':
-      return 'Inventory Added';
-    case 'inventory_edit':
-      return 'Inventory Edited';
-    case 'inventory_delete':
-      return 'Inventory Deleted';
     default:
       return 'Activity';
   }
@@ -1977,24 +1936,10 @@ Color _getActivityTextColor(String type) {
     return const Color(0xFF1976D2); // blue for sales
   } else if (type.startsWith('purchase')) {
     return const Color(0xFF388E3C); // green for purchase
-  } else if (type.startsWith('inventory')) {
-    return const Color(0xFF1976D2); // blue for inventory
   } else if (type.endsWith('_delete')) {
     return const Color(0xFFD32F2F); // red for deletes
-  } else {
-    return getActivityIconBgColor(type); // fallback to icon color
   }
-}
-
-// Add helper for last 7 days as Mon, Tue, ...
-List<String> _getLast7DaysLabels() {
-  final now = DateTime.now();
-  final days = <String>[];
-  for (int i = 6; i >= 0; i--) {
-    final date = now.subtract(Duration(days: i));
-    days.add(DateFormat('E').format(date)); // Mon, Tue, etc.
-  }
-  return days;
+  return const Color(0xFF1976D2); // default fallback
 }
 
 Widget _buildLegendHint(Color color, String label) {

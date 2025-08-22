@@ -1,6 +1,11 @@
+// ignore_for_file: unnecessary_null_comparison
+
 import 'dart:async';
+import 'package:forward_billing_app/providers/dashboard_provider.dart';
 import 'package:forward_billing_app/screens/receipt_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:math_expressions/math_expressions.dart';
 import '../models/bill_item.dart';
 import '../repositories/bill_repository.dart';
@@ -14,10 +19,19 @@ import '../models/bill.dart';
 import '../models/inventory_item.dart';
 import '../models/activity.dart';
 import '../repositories/activity_repository.dart';
-import '../utils/app_theme.dart';
+import '../themes/app_theme.dart';
 import 'dart:ui'; // For BackdropFilter
 import 'package:google_fonts/google_fonts.dart'; // For modern fonts
 import 'package:shared_preferences/shared_preferences.dart';
+import '../repositories/settings_repository.dart';
+import 'package:flutter/foundation.dart';
+import 'package:collection/collection.dart';
+
+import '../utils/auth_utils.dart';
+import '../utils/refresh_manager.dart';
+import 'home_screen.dart';
+import 'login_screen.dart' as login;
+import '../screens/settings_screen.dart';
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -43,12 +57,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   // Initialize controllers and focus nodes immediately
   final priceFocus = FocusNode();
   final quantityFocus = FocusNode();
+  final itemNameFocus = FocusNode();
   final priceController = TextEditingController();
   final quantityController = TextEditingController();
   final itemNameController = TextEditingController();
 
   // Add these properties at the start of class
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _discountController = TextEditingController();
 
   // Remove late keywords and make nullable
   AnimationController? _searchAnimationController;
@@ -57,6 +73,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   // Add repository
   final BillRepository _billRepository = BillRepository();
+  late final Bill bill;
 
   // Add this variable to track editing state
   BillItem? _editingItem;
@@ -73,7 +90,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   // Add these properties to _CustomerBillScreenState:
   String _shortcutBuffer = '';
   Timer? _shortcutEntryTimer;
-  static const Duration _shortcutEntryTimeout = Duration(milliseconds: 500);
+  static const Duration _shortcutEntryTimeout = Duration(milliseconds: 1500);
 
   // Add state for pressed button for animation
   String? _pressedButton;
@@ -122,6 +139,13 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   }
 
   double _discount = 0.0;
+  int _dropdownKey = 0;
+
+  // Temporary tracker for real-time inventory validation
+  Map<String, double> _tempUsedQty =
+      {}; // key: itemName|price, value: used qty in cart
+
+  String? _lastUserId;
 
   @override
   void initState() {
@@ -130,10 +154,35 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     _fetchCustomers();
     _loadDiscount();
     // Always load inventory on open
-    Future.microtask(() {
+    Future.microtask(() async {
+      if (!mounted) return;
       final inventoryCubit = context.read<InventoryCubit>();
-      inventoryCubit.loadInventory();
+      final uid = await getCurrentUserUid();
+      if (uid != null && mounted) {
+        inventoryCubit.loadInventory(userId: uid);
+        // Set per-user cart isolation
+        if (_lastUserId != uid && mounted) {
+          context.read<SalesCubit>().setCurrentUser(uid);
+          _lastUserId = uid;
+        }
+      }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // On dependencies change, ensure cart is for correct user
+    Future.microtask(() async {
+      if (!mounted) return;
+      final uid = await getCurrentUserUid();
+      if (uid != null && _lastUserId != uid && mounted) {
+        context.read<SalesCubit>().setCurrentUser(uid);
+        _lastUserId = uid;
+      }
+    });
+    // Unfocus the search bar when returning to this screen
+    // _searchFocusNode.unfocus(); // This line was not in the new_code, so it's removed.
   }
 
   void _initializeSearchAnimation() {
@@ -152,17 +201,22 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     _searchController.dispose();
     priceFocus.dispose();
     quantityFocus.dispose();
+    itemNameFocus.dispose();
     priceController.dispose();
     quantityController.dispose();
     itemNameController.dispose();
+    _shortcutTimer?.cancel();
+    _shortcutEntryTimer?.cancel();
     super.dispose();
   }
 
   void _showCalculator(bool forQuantity) {
     if (isEditingQuantity != forQuantity) {
-      setState(() {
-        isEditingQuantity = forQuantity;
-      });
+      if (mounted) {
+        setState(() {
+          isEditingQuantity = forQuantity;
+        });
+      }
     }
 
     // Immediate focus and cursor positioning
@@ -186,79 +240,121 @@ class _CalculatorScreenState extends State<CalculatorScreen>
   void _onCalculatorButtonPressed(String value) {
     // Handle shortcut entry
     if (RegExp(r'^[A-D]$').hasMatch(value)) {
+      debugPrint(
+        'Shortcut key pressed: $value, current buffer: $_shortcutBuffer',
+      );
+      _dismissKeyboard();
       _shortcutBuffer = value;
+      debugPrint('Shortcut buffer set to: $_shortcutBuffer');
+      _updateShortcutPreview();
       _startShortcutEntryTimer();
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
       return;
     }
 
     // Handle shortcut entry continuation
     if (_shortcutBuffer.isNotEmpty) {
+      debugPrint(
+        'Shortcut continuation: value=$value, buffer=$_shortcutBuffer',
+      );
       if (value == 'Enter') {
+        debugPrint('Enter pressed, processing shortcut immediately');
+        _dismissKeyboard();
+        _shortcutEntryTimer?.cancel();
         _processShortcutBuffer();
         return;
       }
-
-      // Handle quantity multiplier
       if (_shortcutBuffer.contains('x')) {
         if (RegExp(r'[0-9]').hasMatch(value)) {
+          _dismissKeyboard();
           final newBuffer = _shortcutBuffer + value;
           if (ShortcutValidator.isValidShortcutFormat(newBuffer)) {
             _shortcutBuffer = newBuffer;
+            _updateShortcutPreview();
             _startShortcutEntryTimer();
-            setState(() {});
+            if (mounted) {
+              setState(() {});
+            }
           }
         }
         return;
       }
-
-      // Handle multiplication symbol for quantity
       if (value == '*' && !_shortcutBuffer.contains('x')) {
+        _dismissKeyboard();
         _shortcutBuffer += 'x';
+        _updateShortcutPreview();
         _startShortcutEntryTimer();
-        setState(() {});
+        if (mounted) {
+          setState(() {});
+        }
         return;
       }
-
-      // Handle numeric input for shortcut
       if (RegExp(r'[0-9]').hasMatch(value)) {
+        _dismissKeyboard();
         final newBuffer = _shortcutBuffer + value;
+        debugPrint(
+          'Numeric input for shortcut: value=$value, newBuffer=$newBuffer',
+        );
         if (newBuffer.length <= 6) {
-          // Max shortcut length
           _shortcutBuffer = newBuffer;
+          debugPrint('Shortcut buffer updated to: $_shortcutBuffer');
+          _updateShortcutPreview();
           _startShortcutEntryTimer();
-          setState(() {});
+          if (mounted) {
+            setState(() {});
+          }
         }
       }
       return;
     }
-
-    setState(() {
-      if (['+', '-', '*', '÷', '%'].contains(value)) {
-        if (!isEditingQuantity && value == '*') {
-          _showCalculator(true);
-          return;
+    if (mounted) {
+      setState(() {
+        if (['+', '-', '*', '÷', '%'].contains(value)) {
+          if (!isEditingQuantity && value == '*') {
+            _showCalculator(true);
+            return;
+          }
+          _handleOperation(value);
+        } else if (value == 'Del') {
+          _handleDelete();
+        } else if (value == 'AC') {
+          _clearAll();
+        } else {
+          _handleNumberInput(value);
         }
-        _handleOperation(value);
-      } else if (value == 'Del') {
-        _handleDelete();
-      } else if (value == 'AC') {
-        _clearAll();
-      } else {
-        _handleNumberInput(value);
+      });
+    }
+  }
+
+  void _dismissKeyboard() {
+    // Only unfocus the item name field to dismiss keyboard
+    // Don't unfocus other fields as they might interfere with shortcut processing
+    itemNameFocus.unfocus();
+    // Use a small delay to ensure keyboard dismissal doesn't interfere with button presses
+    Future.delayed(Duration(milliseconds: 50), () {
+      if (mounted) {
+        FocusScope.of(context).unfocus();
       }
     });
   }
 
   void _startShortcutMode(String key) {
+    // Unfocus the item name field to close keyboard when shortcut is pressed
+    _dismissKeyboard();
     _pendingShortcut = key;
     _isWaitingForNumber = true;
     _shortcutTimer?.cancel();
     _shortcutTimer = Timer(const Duration(milliseconds: 2000), () {
-      _clearShortcutState();
+      if (mounted) {
+        _clearShortcutState();
+      }
       // Timer expired without a number press - shortcut already handled
     });
-    setState(() {}); // Refresh UI to show active state
+    if (mounted) {
+      setState(() {}); // Refresh UI to show active state
+    }
   }
 
   void _clearShortcutState() {
@@ -288,10 +384,29 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       // Check if item is out of stock (quantity is 0 or less)
       if (item.quantity <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Out of stock! ${item.name} has no items available.'),
+          const SnackBar(
+            content: Text('Out of stock!'),
             backgroundColor: Colors.red,
           ),
+        );
+        return;
+      }
+
+      // Guard against exceeding available stock considering what is already in the cart
+      final salesCubit = context.read<SalesCubit>();
+      final alreadyAddedQty = salesCubit.items
+          .where(
+            (i) =>
+                i.name.trim().toLowerCase() == item.name.trim().toLowerCase(),
+          )
+          .fold<double>(0.0, (sum, i) => sum + i.quantity);
+      if (alreadyAddedQty + 1 > item.quantity) {
+        final remaining = (item.quantity - alreadyAddedQty).toInt();
+        final msg = remaining <= 0
+            ? 'Insufficient stock! You\'ve already added the maximum available for ${item.name}.'
+            : 'Insufficient stock! ${item.name}: you can add up to $remaining more.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red),
         );
         return;
       }
@@ -331,18 +446,18 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       quantityController.text = quantityValue;
     } else {
       if (priceValue.isEmpty && operation != '-') {
-      return;
-    }
+        return;
+      }
       if (RegExp(r'[+\-*/%]$').hasMatch(priceValue.trim())) {
         return;
       }
       if (operation == '*') {
         _showCalculator(true);
         return;
-        }
+      }
       priceValue = '${priceValue.trim()} $operation ';
-          priceController.text = priceValue;
-        }
+      priceController.text = priceValue;
+    }
   }
 
   String _parseExpression(String input) {
@@ -518,9 +633,25 @@ class _CalculatorScreenState extends State<CalculatorScreen>
               return 'Out of stock! ${inventoryItem.name} has no items available.';
             }
 
-            // Check if requested quantity exceeds available stock
-            if (quantity > inventoryItem.quantity) {
-              return 'Insufficient stock! ${inventoryItem.name} has only ${inventoryItem.quantity.toStringAsFixed(0)} items available. You cannot add more than ${inventoryItem.quantity.toStringAsFixed(0)} items.';
+            // Temporary UI-only validation: ensure total requested (already in cart + this request)
+            // does not exceed available stock in inventory.
+            final salesCubit = context.read<SalesCubit>();
+            final alreadyAddedQty = salesCubit.items
+                .where(
+                  (i) =>
+                      i.name.trim().toLowerCase() ==
+                      inventoryItem.name.trim().toLowerCase(),
+                )
+                .fold<double>(0.0, (sum, i) => sum + i.quantity);
+            final remaining = inventoryItem.quantity - alreadyAddedQty;
+
+            if (remaining <= 0) {
+              return 'Insufficient stock! You\'ve already added the maximum available for ${inventoryItem.name}.';
+            }
+
+            if (quantity > remaining) {
+              final canAdd = remaining.toInt();
+              return 'Insufficient stock! ${inventoryItem.name} has only ${inventoryItem.quantityAsInt} available. You\'ve already added ${alreadyAddedQty.toInt()}. You can add up to $canAdd more.';
             }
           }
         }
@@ -543,6 +674,10 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       _editingItem = null;
       _lastNumber = null;
       _pendingOperation = null;
+
+      // Clear shortcut buffer
+      _shortcutBuffer = '';
+      _shortcutEntryTimer?.cancel();
 
       // Set focus back to price field
       _showCalculator(false);
@@ -568,15 +703,26 @@ class _CalculatorScreenState extends State<CalculatorScreen>
     return 'Item 1';
   }
 
+  // Extracts the numeric suffix from default item names like 'Item 1', case-insensitive
+  // Returns null if name is not a default-form name
+  int? _extractDefaultItemNumber(String name) {
+    final match = RegExp(
+      r'^item\s+(\d+)',
+      caseSensitive: false,
+    ).firstMatch(name.trim());
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
   // In addBillItem, after a successful add, clear price/qty and set itemNameController.text to _getDefaultItemName()
   Future<void> addBillItem() async {
     final validationError = validateInputs();
     if (validationError != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(validationError), backgroundColor: Colors.red),
-        );
-        return;
-      }
+      );
+      return;
+    }
 
     final priceResult = _parseExpression(priceValue);
     final quantityResult = _parseExpression(quantityValue);
@@ -593,53 +739,159 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
     double finalPrice = double.parse(priceResult);
     double finalQuantity = double.parse(quantityResult);
-      if (_editingItem != null) {
-        final updatedItem = BillItem(
-          id: _editingItem!.id,
-          serialNo: _editingItem!.serialNo,
-          name: itemNameController.text.trim().isNotEmpty
-              ? itemNameController.text.trim()
-              : _editingItem!.name,
-          price: finalPrice,
-          quantity: finalQuantity,
-        );
-        await _billRepository.updateBillItem(updatedItem);
-      } else {
-        String itemName = itemNameController.text.trim();
-        if (itemName.isEmpty) {
-          itemName = _getDefaultItemName();
+    final salesCubit = context.read<SalesCubit>();
+    // Get current inventory
+    final inventoryState = context.read<InventoryCubit>().state;
+    List<InventoryItem> inventoryList = [];
+    if (inventoryState is InventoryLoaded) {
+      inventoryList = inventoryState.items;
+    }
+    String itemName = itemNameController.text.trim();
+    if (itemName.isEmpty) {
+      itemName = _getDefaultItemName();
+    }
+    // Normalize default item names for merging
+    String normalizedItemName = itemName;
+    final int? defaultNumber = _extractDefaultItemNumber(itemName);
+    if (defaultNumber != null) {
+      // Standardize casing/spacing
+      normalizedItemName = 'Item $defaultNumber';
+      debugPrint(
+        'Calculator: Normalized default name "$itemName" to "$normalizedItemName"',
+      );
+    }
+    // Find inventory item
+    final InventoryItem? invItem = inventoryList.firstWhereOrNull(
+      (inv) =>
+          inv.name.trim().toLowerCase() == itemName.trim().toLowerCase() &&
+          inv.price == finalPrice,
+    );
+    if (invItem != null) {
+      // Calculate used quantity in cart
+      final key = '${invItem.name}|${invItem.price}';
+      double usedQty = 0.0;
+      for (final item in salesCubit.items) {
+        if (item.name.trim().toLowerCase() ==
+                invItem.name.trim().toLowerCase() &&
+            item.price == invItem.price) {
+          usedQty += item.quantity;
         }
+      }
+      // If editing, subtract the old quantity
+      if (_editingItem != null &&
+          _editingItem!.name.trim().toLowerCase() ==
+              invItem.name.trim().toLowerCase() &&
+          _editingItem!.price == invItem.price) {
+        usedQty -= _editingItem!.quantity;
+      }
+      if (usedQty + finalQuantity > invItem.quantity) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Item is out of stock'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+    if (_editingItem != null) {
+      final updatedItem = BillItem(
+        id: _editingItem!.id,
+        serialNo: _editingItem!.serialNo,
+        name: itemNameController.text.trim().isNotEmpty
+            ? itemNameController.text.trim()
+            : _editingItem!.name,
+        price: finalPrice,
+        quantity: finalQuantity,
+      );
+      if (_editingItem!.id != null) {
+        final userId = FirebaseAuth.instance.currentUser?.uid;
+        final currentBillId = bill.id;
+        if (userId != null) {
+          await _billRepository.updateBillItem(
+            userId,
+            currentBillId!,
+            updatedItem,
+          );
+        }
+      } else {
+        // Update in-memory cart item
+        salesCubit.updateCartItem(_editingItem!, updatedItem);
+      }
+    } else {
+      // Check for existing item (merge by normalized name and price)
+      final existingIndex = salesCubit.items.indexWhere((item) {
+        // For default names, compare by numeric suffix (case-insensitive) and price
+        if (defaultNumber != null) {
+          final itemNumber = _extractDefaultItemNumber(item.name);
+          if (itemNumber != null) {
+            final isSameDefaultName =
+                itemNumber == defaultNumber && item.price == finalPrice;
+            debugPrint(
+              'Calculator: Comparing default names - Item $itemNumber vs Item $defaultNumber, price match: ${item.price == finalPrice}, result: $isSameDefaultName',
+            );
+            return isSameDefaultName;
+          }
+        }
+        // For non-default names, use the original logic
+        final nameMatch =
+            item.name.trim().toLowerCase() ==
+            normalizedItemName.trim().toLowerCase();
+        final priceMatch = item.price == finalPrice;
+        debugPrint(
+          'Calculator: Comparing non-default names - "${item.name}" vs "$normalizedItemName", price match: $priceMatch, result: ${nameMatch && priceMatch}',
+        );
+        return nameMatch && priceMatch;
+      });
+      if (existingIndex != -1) {
+        // Update quantity of existing item
+        final existingItem = salesCubit.items[existingIndex];
+        final updatedItem = existingItem.copyWith(
+          quantity: existingItem.quantity + finalQuantity,
+        );
+        debugPrint(
+          'Calculator: Merging items - Existing: ${existingItem.name} (qty: ${existingItem.quantity}), New qty: $finalQuantity, Total: ${updatedItem.quantity}',
+        );
+        salesCubit.updateCartItem(existingItem, updatedItem);
+      } else {
         final newItem = BillItem(
           serialNo: 0,
           name: itemName,
           price: finalPrice,
           quantity: finalQuantity,
         );
-        await context.read<SalesCubit>().addBillItem(newItem);
+        debugPrint(
+          'Calculator: Adding new item - Name: $itemName, Price: $finalPrice, Qty: $finalQuantity',
+        );
+        await salesCubit.addBillItem(newItem);
       }
-      // Clear price and quantity fields, set item name to next default
-      priceController.clear();
-      quantityController.clear();
-      priceValue = '';
-      quantityValue = '';
-      itemNameController.text = _getDefaultItemName();
-      _shortcutBuffer = '';
-      setState(() {});
+    }
+    // Clear price and quantity fields, set item name to next default
+    priceController.clear();
+    quantityController.clear();
+    priceValue = '';
+    quantityValue = '';
+    _updateItemNameField();
+    _shortcutBuffer = '';
+    _editingItem = null;
+    setState(() {});
   }
 
   // Update toggle search method
   void _toggleSearch() {
     if (!mounted || _searchAnimationController == null) return;
 
-    setState(() {
-      _isSearchVisible = !_isSearchVisible;
-      if (_isSearchVisible) {
-        _searchAnimationController?.forward();
-      } else {
-        _searchAnimationController?.reverse();
-        _searchController.clear();
-      }
-    });
+    if (mounted) {
+      setState(() {
+        _isSearchVisible = !_isSearchVisible;
+        if (_isSearchVisible) {
+          _searchAnimationController?.forward();
+        } else {
+          _searchAnimationController?.reverse();
+          _searchController.clear();
+        }
+      });
+    }
   }
 
   // Search handler for text field changes
@@ -663,11 +915,27 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       final List<BillItem> billItems = List.from(
         context.read<SalesCubit>().items,
       );
-      final double billTotal = BillItem.calculateBillTotal(billItems);
+      // Compute monetary breakdown
+      final double subTotal = BillItem.calculateBillTotal(billItems);
+      final double discountPercent = (_discount.clamp(0, 100));
+      final double discountAmount = subTotal * (discountPercent / 100);
       final DateTime billDate = DateTime.now();
       final String customer = _selectedCustomer ?? 'Walk-in Customer';
       final String paymentMethod = _selectedPaymentMethod;
       final int billNumber = DateTime.now().millisecondsSinceEpoch % 1000000;
+
+      // Resolve current user id for settings and saving
+      final uid = await getCurrentUserUid();
+
+      // Load tax from settings
+      final settingsRepo = SettingsRepository();
+      final settings = (uid != null && uid.isNotEmpty)
+          ? await settingsRepo.getSettings(uid)
+          : null;
+      final double taxPercent =
+          double.tryParse(settings?.taxRate ?? '0') ?? 0.0;
+      final double taxAmount = (subTotal - discountAmount) * (taxPercent / 100);
+      final double billTotal = subTotal - discountAmount + taxAmount;
 
       // *** Save Bill and its items ***
       final BillRepository billRepo = BillRepository();
@@ -677,11 +945,35 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         customerName: customer,
         paymentMethod: paymentMethod,
         items: billItems,
+        subTotal: subTotal,
+        discount: discountPercent,
+        tax: taxPercent,
+        total: billTotal,
       );
-      await billRepo.insertBillWithItems(bill);
+      debugPrint('Calculator: Creating bill with UID: $uid');
+      debugPrint('Calculator: Bill object: ${bill.toString()}');
+      if (uid == null || uid.isEmpty) {
+        debugPrint('Calculator: ERROR: UID is null or empty when saving bill!');
+        return;
+      }
+      await billRepo.insertBillWithItems(bill, uid);
+      debugPrint('Calculator: Bill inserted for UID: $uid');
+
+      // Trigger refresh for all screens
+      final refreshManager = Provider.of<RefreshManager>(
+        context,
+        listen: false,
+      );
+      refreshManager.refreshSales();
+      refreshManager.refreshInventory();
+      refreshManager.refreshDashboard();
+
+      // Also trigger dashboard refresh directly
+      final provider = Provider.of<DashboardProvider>(context, listen: false);
 
       await ActivityRepository().logActivity(
         Activity(
+          userId: uid,
           type: 'sale_add',
           description: 'Created bill for $customer, total: Rs $billTotal',
           timestamp: DateTime.now(),
@@ -704,6 +996,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                 paymentMethod: paymentMethod,
                 dateTime: billDate,
                 billNumber: billNumber,
+                discount: _discount,
               ),
           transitionDuration: const Duration(milliseconds: 500),
           reverseTransitionDuration: const Duration(milliseconds: 500),
@@ -722,12 +1015,17 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       );
 
       // Update inventory after sale (handles quantity reduction and marking as sold when quantity reaches 0)
-      await context.read<InventoryCubit>().updateInventoryAfterSale(billItems);
+      if (uid != null) {
+        await context.read<InventoryCubit>().updateInventoryAfterSale(
+          billItems,
+          uid,
+        );
+      }
 
       // Refresh SalesCubit inventory after sale
       final inventoryCubit = context.read<InventoryCubit>();
       final salesCubit = context.read<SalesCubit>();
-      final latestInventory = inventoryCubit.unsoldItems;
+      final latestInventory = inventoryCubit.items;
       salesCubit.updateInventory(latestInventory);
 
       // Show success message
@@ -740,12 +1038,14 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       );
 
       // Reset input fields
-      itemNameController.text = _getDefaultItemName();
+      _updateItemNameField();
       priceController.clear();
       quantityController.clear();
       priceValue = '';
       quantityValue = '';
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       debugPrint('Error creating bill: $e');
       if (!mounted) return;
@@ -768,7 +1068,15 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<InventoryCubit, InventoryState>(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return BlocConsumer<InventoryCubit, InventoryState>(
+      listenWhen: (previous, current) => current is InventoryLoaded,
+      listener: (context, inventoryState) {
+        if (inventoryState is InventoryLoaded) {
+          // Whenever inventory changes, update SalesCubit inventory cache
+          context.read<SalesCubit>().updateInventory(inventoryState.items);
+        }
+      },
       builder: (context, inventoryState) {
         if (inventoryState is InventoryLoading ||
             inventoryState is InventoryInitial) {
@@ -786,11 +1094,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           listener: (context, state) {
             if (state is SalesUpdated) {
               // Always update input fields based on Cubit state
-              if (state.items.isEmpty) {
-                itemNameController.text = 'Item 1';
-              } else {
-                itemNameController.text = 'Item ${state.items.length + 1}';
-              }
+              _updateItemNameField();
               priceController.clear();
               quantityController.clear();
               priceValue = '';
@@ -806,17 +1110,25 @@ class _CalculatorScreenState extends State<CalculatorScreen>
             }
           },
           child: Scaffold(
-            backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF0F0F0F) : Theme.of(context).scaffoldBackgroundColor,
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF0F0F0F)
+                : Theme.of(context).scaffoldBackgroundColor,
             appBar: PreferredSize(
               preferredSize: const Size.fromHeight(87),
+
               child: Container(
                 padding: const EdgeInsets.fromLTRB(5, 6, 0, 6),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.white, Colors.blue.shade50],
-                  ),
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1A2233)
+                      : null,
+                  gradient: Theme.of(context).brightness == Brightness.dark
+                      ? null
+                      : LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.white, Colors.blue.shade50],
+                        ),
                   borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(24),
                     bottomRight: Radius.circular(24),
@@ -836,9 +1148,11 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     children: [
                       // Back Button
                       IconButton(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.arrow_back_ios,
-                          color: Color.fromARGB(255, 6, 61, 107),
+                          color: isDark
+                              ? Colors.blue
+                              : const Color.fromARGB(255, 1, 64, 116),
                           size: 16,
                         ),
                         onPressed: () {
@@ -874,8 +1188,11 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
+                                  key: ValueKey(_dropdownKey),
                                   isExpanded: true,
-                                  value: _selectedCustomer,
+                                  value: _customerList.isEmpty
+                                      ? null
+                                      : _selectedCustomer,
                                   hint: Text(
                                     '+ Add Customer',
                                     style: TextStyle(
@@ -890,12 +1207,55 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                     color: Colors.blue,
                                   ),
                                   dropdownColor: Theme.of(context).cardColor,
-                                  onChanged: (String? newValue) {
+                                  onChanged: (String? newValue) async {
+                                    if (_customerList.isEmpty) return;
+                                    // Normalize the special option value (supports both 'Add more' and 'Add_more')
+                                    final isAddMore =
+                                        newValue == 'Add more' ||
+                                        newValue == 'Add_more';
+                                    if (isAddMore) {
+                                      setState(() {
+                                        _dropdownKey++;
+                                      });
+                                      await Future.delayed(
+                                        const Duration(milliseconds: 50),
+                                      );
+                                      // Navigate to Peoples screen, Customers tab (index 1)
+                                      await Navigator.pushNamed(
+                                        context,
+                                        '/peoples',
+                                        arguments: {'tab': 1},
+                                      );
+                                      // Refresh local customers after returning
+                                      await _fetchCustomers();
+                                      return;
+                                    }
                                     setState(() {
                                       _selectedCustomer = newValue;
                                     });
                                   },
                                   selectedItemBuilder: (context) {
+                                    if (_customerList.isEmpty) {
+                                      return [
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.person_outline,
+                                              color: Colors.grey,
+                                              size: 16,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              'No customers',
+                                              style: TextStyle(
+                                                color: Colors.grey,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ];
+                                    }
                                     return _customerList.map((People customer) {
                                       return Row(
                                         children: [
@@ -929,40 +1289,144 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                       );
                                     }).toList();
                                   },
-                                  items: _customerList.map((People customer) {
-                                    return DropdownMenuItem<String>(
-                                      value: customer.name,
-                                      child: Row(
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 12,
-                                            backgroundColor: (Colors.blue)
-                                                .withOpacity(0.13),
-                                            child: Text(
-                                              customer.name.isNotEmpty
-                                                  ? customer.name[0]
-                                                        .toUpperCase()
-                                                  : '',
-                                              style: TextStyle(
-                                                color: Color(0xFF1E8858),
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 13,
-                                              ),
+                                  items: _customerList.isEmpty
+                                      ? [
+                                          DropdownMenuItem<String>(
+                                            enabled: false,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.person_outline,
+                                                      color: Colors.grey,
+                                                      size: 16,
+                                                    ),
+                                                    SizedBox(width: 8),
+                                                    Text(
+                                                      'No customers',
+                                                      style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                SizedBox(height: 8),
+                                                GestureDetector(
+                                                  onTap: () async {
+                                                    setState(() {
+                                                      _dropdownKey++;
+                                                    });
+                                                    await Future.delayed(
+                                                      const Duration(
+                                                        milliseconds: 50,
+                                                      ),
+                                                    );
+                                                    await Navigator.pushNamed(
+                                                      context,
+                                                      '/peoples',
+                                                      arguments: {'tab': 1},
+                                                    );
+                                                    await _fetchCustomers();
+                                                  },
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                        Icons
+                                                            .add_circle_outline,
+                                                        color: Color(
+                                                          0xFF1976D2,
+                                                        ),
+                                                        size: 18,
+                                                      ),
+                                                      SizedBox(width: 6),
+                                                      Text(
+                                                        'Add One',
+                                                        style: TextStyle(
+                                                          color: Color(
+                                                            0xFF1976D2,
+                                                          ),
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 13,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            customer.name,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: Colors.blue,
-                                              fontWeight: FontWeight.w600,
+                                        ]
+                                      : [
+                                          ..._customerList.map((
+                                            People customer,
+                                          ) {
+                                            return DropdownMenuItem<String>(
+                                              value: customer.name,
+                                              child: Row(
+                                                children: [
+                                                  CircleAvatar(
+                                                    radius: 12,
+                                                    backgroundColor:
+                                                        (Colors.blue)
+                                                            .withOpacity(0.13),
+                                                    child: Text(
+                                                      customer.name.isNotEmpty
+                                                          ? customer.name[0]
+                                                                .toUpperCase()
+                                                          : '',
+                                                      style: TextStyle(
+                                                        color: Color(
+                                                          0xFF1E8858,
+                                                        ),
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    customer.name,
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      color: Colors.blue,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList(),
+                                          // Add the '+ Add more' option always at the bottom
+                                          DropdownMenuItem<String>(
+                                            value: 'Add_more',
+                                            enabled: true,
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.add_circle_outline,
+                                                  color: Color(0xFF1976D2),
+                                                  size: 18,
+                                                ),
+                                                SizedBox(width: 6),
+                                                Text(
+                                                  ' Add more',
+                                                  style: TextStyle(
+                                                    color: Color(0xFF1976D2),
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ],
-                                      ),
-                                    );
-                                  }).toList(),
                                 ),
                               ),
                             ),
@@ -1070,14 +1534,115 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                 ],
                               ),
                               const SizedBox(height: 2),
-                              Text(
-                                'Discount: ${_discount.toStringAsFixed(0)}%',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 11, // slightly reduced
+                              GestureDetector(
+                                onTap: () {
+                                  _discountController.text = _discount
+                                      .toStringAsFixed(0);
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: Text(
+                                        'Edit Discount',
+                                        style: GoogleFonts.poppins(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.white
+                                              : const Color(0xFF1976D2),
+                                        ),
+                                      ),
+                                      content: TextField(
+                                        controller: _discountController,
+                                        keyboardType:
+                                            TextInputType.numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                        decoration: InputDecoration(
+                                          hintText: 'Enter discount percentage',
+                                          suffixText: '%',
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(context),
+                                          child: Text(
+                                            'Cancel',
+                                            style: GoogleFonts.poppins(
+                                              color: const Color(0xFF1976D2),
+                                            ),
+                                          ),
+                                        ),
+                                        ElevatedButton(
+                                          onPressed: () {
+                                            final newDiscount = double.tryParse(
+                                              _discountController.text,
+                                            );
+                                            if (newDiscount != null &&
+                                                newDiscount >= 0 &&
+                                                newDiscount <= 100) {
+                                              setState(
+                                                () => _discount = newDiscount,
+                                              );
+                                              Navigator.pop(context);
+                                            } else {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Please enter a valid discount (0-100)',
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(
+                                              0xFF1976D2,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            'Save',
+                                            style: GoogleFonts.poppins(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Discount: ${_discount.toStringAsFixed(0)}%',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(
+                                      Icons.edit,
+                                      color: Colors.white,
+                                      size: 12,
+                                    ),
+                                  ],
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
@@ -1208,69 +1773,118 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12.0,
-                        vertical: 0.0,
+                        vertical: 6.0,
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(12),
                         child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 250),
                             curve: Curves.easeInOut,
                             decoration: BoxDecoration(
-                              color: Theme.of(context).cardColor.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(18),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.blue.withOpacity(0.10),
-                                  blurRadius: 16,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
+                              color: isDark
+                                  ? const Color(0xFF0B1E3A).withOpacity(0.72)
+                                  : Theme.of(context).cardColor.withOpacity(0.75),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: isDark
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF3D5AFE).withOpacity(0.18),
+                                        blurRadius: 16,
+                                        spreadRadius: 0.5,
+                                        offset: const Offset(0, 6),
+                                      ),
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.35),
+                                        blurRadius: 14,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ]
+                                  : [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.06),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
                               border: Border.all(
-                                color: Colors.blue.withOpacity(0.08),
+                                color: isDark
+                                    ? const Color(0xFF3D5AFE).withOpacity(0.22)
+                                    : const Color(0xFFE3F2FD),
                               ),
                             ),
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
+                              horizontal: 10,
+                              vertical: 6,
                             ),
                             child: Row(
                               children: [
                                 Expanded(
                                   flex: 2,
                                   child: Container(
-                                    height: 47,
+                                    height: 40,
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).cardColor,
-                                      borderRadius: BorderRadius.circular(8),
+                                      color: Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
+                                          color: isDark
+                                              ? Colors.black.withOpacity(0.35)
+                                              : Colors.black.withOpacity(0.08),
+                                          blurRadius: isDark ? 10 : 8,
+                                          offset: const Offset(0, 2),
                                         ),
                                       ],
                                     ),
                                     child: TextField(
                                       controller: itemNameController,
+                                      focusNode: itemNameFocus,
                                       keyboardType: TextInputType.text,
+                                      onEditingComplete: () {
+                                        FocusScope.of(context).requestFocus(priceFocus);
+                                      },
                                       decoration: InputDecoration(
-                                        hintText: _getDefaultItemName(),
+                                        hintText: _getNextItemSerialName(),
                                         border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
+                                          borderRadius: BorderRadius.circular(8),
                                           borderSide: BorderSide.none,
                                         ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 14,
-                                            ),
+                                        contentPadding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
                                         filled: true,
-                                        fillColor: Theme.of(context).cardColor,
+                                        fillColor: isDark
+                                            ? const Color(0xFF102A43)
+                                            : Colors.white,
+                                        hintStyle: GoogleFonts.poppins(
+                                          color: isDark ? Colors.white70 : Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF3D5AFE).withOpacity(0.35)
+                                                : Colors.black12,
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF64B5F6)
+                                                : Theme.of(context).primaryColor,
+                                            width: 1.3,
+                                          ),
+                                        ),
+                                      ),
+                                      cursorColor: AppTheme.getCursorColor(context),
+                                      style: GoogleFonts.poppins(
+                                        color: isDark ? Colors.white : null,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                   ),
@@ -1279,16 +1893,17 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                 Expanded(
                                   flex: 1,
                                   child: Container(
-                                    height: 47,
+                                    height: 40,
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).cardColor,
-                                      borderRadius: BorderRadius.circular(8),
+                                      color: Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
+                                          color: isDark
+                                              ? Colors.black.withOpacity(0.35)
+                                              : Colors.black.withOpacity(0.08),
+                                          blurRadius: isDark ? 10 : 8,
+                                          offset: const Offset(0, 2),
                                         ),
                                       ],
                                     ),
@@ -1297,26 +1912,53 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                       controller: priceController,
                                       focusNode: priceFocus,
                                       onTap: () => _showCalculator(false),
+                                      onEditingComplete: () {
+                                        FocusScope.of(context).requestFocus(quantityFocus);
+                                      },
                                       cursorWidth: 2,
                                       cursorHeight: 24,
-                                      cursorColor: Colors.blue,
+                                      cursorColor: AppTheme.getCursorColor(context),
                                       showCursor: true,
-                                      style: TextStyle(fontSize: 16),
+                                      style: GoogleFonts.poppins(
+                                        color: isDark ? Colors.white : null,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                       decoration: InputDecoration(
                                         hintText: 'eg: 100',
                                         border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
+                                          borderRadius: BorderRadius.circular(8),
                                           borderSide: BorderSide.none,
                                         ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 14,
-                                            ),
+                                        contentPadding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 10,
+                                        ),
                                         filled: true,
-                                        fillColor: Theme.of(context).cardColor,
+                                        fillColor: isDark
+                                            ? const Color(0xFF102A43)
+                                            : Colors.white,
+                                        hintStyle: GoogleFonts.poppins(
+                                          color: isDark ? Colors.white60 : Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF3D5AFE).withOpacity(0.35)
+                                                : Colors.black12,
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF64B5F6)
+                                                : Theme.of(context).primaryColor,
+                                            width: 1.3,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1325,16 +1967,17 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                 Expanded(
                                   flex: 1,
                                   child: Container(
-                                    height: 47,
+                                    height: 40,
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context).cardColor,
-                                      borderRadius: BorderRadius.circular(8),
+                                      color: Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.grey.shade300,
-                                          spreadRadius: 2,
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 3),
+                                          color: isDark
+                                              ? Colors.black.withOpacity(0.35)
+                                              : Colors.black.withOpacity(0.08),
+                                          blurRadius: isDark ? 10 : 8,
+                                          offset: const Offset(0, 2),
                                         ),
                                       ],
                                     ),
@@ -1345,25 +1988,49 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                       onTap: () => _showCalculator(true),
                                       cursorWidth: 2,
                                       cursorHeight: 24,
-                                      cursorColor: Colors.blue,
+                                      cursorColor: AppTheme.getCursorColor(context),
                                       showCursor: true,
                                       textAlign: TextAlign.left,
-                                      style: TextStyle(fontSize: 16),
+                                      style: GoogleFonts.poppins(
+                                        color: isDark ? Colors.white : null,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                       decoration: InputDecoration(
                                         hintText: 'eg: 2',
                                         border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
+                                          borderRadius: BorderRadius.circular(8),
                                           borderSide: BorderSide.none,
                                         ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 14,
-                                            ),
+                                        contentPadding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 10,
+                                        ),
                                         filled: true,
-                                        fillColor: Theme.of(context).cardColor,
+                                        fillColor: isDark
+                                            ? const Color(0xFF102A43)
+                                            : Colors.white,
+                                        hintStyle: GoogleFonts.poppins(
+                                          color: isDark ? Colors.white60 : Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF3D5AFE).withOpacity(0.35)
+                                                : Colors.black12,
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                          borderSide: BorderSide(
+                                            color: isDark
+                                                ? const Color(0xFF64B5F6)
+                                                : Theme.of(context).primaryColor,
+                                            width: 1.3,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1374,6 +2041,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                         ),
                       ),
                     ),
+                    const SizedBox(height: 6),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -1385,15 +2053,10 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                           filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Theme.of(context).cardColor.withOpacity(0.7),
+                              color: Theme.of(
+                                context,
+                              ).cardColor.withOpacity(0.7),
                               borderRadius: BorderRadius.circular(6),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.blue.withOpacity(0.08),
-                                  blurRadius: 16,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
                             ),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -1515,7 +2178,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                                             ],
                                           ),
                                           child: ElevatedButton(
-                                            onPressed: addBillItem,
+                                            onPressed: addBillItemAndRefresh,
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor:
                                                   Colors.transparent,
@@ -1578,7 +2241,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
               ),
               child: BottomAppBar(
                 elevation: 0,
-                color: Theme.of(context).scaffoldBackgroundColor, // Use transparent to show gradient
+                color: Theme.of(
+                  context,
+                ).scaffoldBackgroundColor, // Use transparent to show gradient
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 4,
@@ -1852,19 +2517,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       onDismissed: (direction) {
-        // If id is null, remove by matching all fields
-        final cubit = context.read<SalesCubit>();
-        if (item.id == null) {
-          cubit.removeItemByFields(
-            item.name,
-            item.price,
-            item.quantity,
-            item.serialNo,
-          );
-        } else {
-          cubit.removeItem(item);
-        }
+        _handleDeleteCartItem(item);
         // Update itemNameController to next default name
+        final cubit = context.read<SalesCubit>();
         final state = cubit.state;
         if (state is SalesUpdated && state.items.isNotEmpty) {
           final nextIdx = state.items.length + 1;
@@ -1878,8 +2533,8 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           setState(() {
             _editingItem = item;
             itemNameController.text = item.name;
-            priceValue = item.price.toStringAsFixed(2);
-            quantityValue = item.quantity.toStringAsFixed(2);
+            priceValue = item.priceAsInt.toString();
+            quantityValue = item.quantityAsInt.toString();
             priceController.text = priceValue;
             quantityController.text = quantityValue;
           });
@@ -1958,7 +2613,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
                       ),
                     ),
                     child: Text(
-                      '${item.price.toStringAsFixed(0)} × ${item.quantity.toStringAsFixed(0)}',
+                      '${item.priceAsInt} × ${item.quantityAsInt}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 12,
@@ -2052,6 +2707,7 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         return;
       }
 
+      final salesCubit = context.read<SalesCubit>();
       if (_editingItem != null) {
         // Update existing item
         final updatedItem = BillItem(
@@ -2063,26 +2719,99 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           price: double.parse(priceValue),
           quantity: double.parse(quantityValue),
         );
-
-        await _billRepository.updateBillItem(updatedItem);
+        if (_editingItem!.id != null) {
+          final userId = FirebaseAuth.instance.currentUser?.uid;
+          final currentBillId = bill.id;
+          if (currentBillId == null) {
+            debugPrint('Error: Current bill ID is null');
+            if (userId != null) {
+              await _billRepository.updateBillItem(
+                userId,
+                currentBillId!,
+                updatedItem,
+              );
+            }
+          }
+        } else {
+          // Update in-memory cart item
+          salesCubit.updateCartItem(_editingItem!, updatedItem);
+        }
       } else {
         // Create new item
         String itemName = itemNameController.text.trim();
         if (itemName.isEmpty) {
-          itemName = 'Item';
+          itemName = _getDefaultItemName();
+        }
+        final finalPrice = double.parse(priceValue);
+        final finalQuantity = double.parse(quantityValue);
+
+        // Normalize default item names for merging
+        String normalizedItemName = itemName;
+        final defaultNameMatch = RegExp(r'^Item (\d+)').firstMatch(itemName);
+        if (defaultNameMatch != null) {
+          // Always treat 'Item X' as the same if the number matches
+          normalizedItemName = 'Item ${defaultNameMatch.group(1)}';
+          debugPrint(
+            'Calculator: Normalized default name "$itemName" to "$normalizedItemName"',
+          );
         }
 
-        final newItem = BillItem(
-          serialNo: 0,
-          name: itemName,
-          price: double.parse(priceValue),
-          quantity: double.parse(quantityValue),
-        );
-
-        await context.read<SalesCubit>().addBillItem(newItem);
+        // Check for existing item with enhanced logic for default names
+        final existingIndex = salesCubit.items.indexWhere((item) {
+          // For default names, use the normalized comparison
+          if (defaultNameMatch != null) {
+            final itemDefaultMatch = RegExp(
+              r'^Item (\d+)',
+            ).firstMatch(item.name);
+            if (itemDefaultMatch != null) {
+              final itemNumber = itemDefaultMatch.group(1);
+              final newNumber = defaultNameMatch.group(1);
+              final isSameDefaultName =
+                  itemNumber == newNumber && item.price == finalPrice;
+              debugPrint(
+                'Calculator: Comparing default names - Item $itemNumber vs Item $newNumber, price match: ${item.price == finalPrice}, result: $isSameDefaultName (addBillItemAndRefresh)',
+              );
+              return isSameDefaultName;
+            }
+          }
+          // For non-default names, use the original logic
+          final nameMatch =
+              item.name.trim().toLowerCase() ==
+              normalizedItemName.trim().toLowerCase();
+          final priceMatch = item.price == finalPrice;
+          debugPrint(
+            'Calculator: Comparing non-default names - "${item.name}" vs "$normalizedItemName", price match: $priceMatch, result: ${nameMatch && priceMatch} (addBillItemAndRefresh)',
+          );
+          return nameMatch && priceMatch;
+        });
+        if (existingIndex != -1) {
+          // Update quantity of existing item
+          final existingItem = salesCubit.items[existingIndex];
+          final updatedItem = existingItem.copyWith(
+            quantity: existingItem.quantity + finalQuantity,
+          );
+          debugPrint(
+            'Calculator: Merging items - Existing: ${existingItem.name} (qty: ${existingItem.quantity}), New qty: $finalQuantity, Total: ${updatedItem.quantity} (addBillItemAndRefresh)',
+          );
+          salesCubit.updateCartItem(existingItem, updatedItem);
+        } else {
+          final newItem = BillItem(
+            serialNo: 0,
+            name: itemName,
+            price: finalPrice,
+            quantity: finalQuantity,
+          );
+          debugPrint(
+            'Calculator: Adding new item - Name: $itemName, Price: $finalPrice, Qty: $finalQuantity (addBillItemAndRefresh)',
+          );
+          await salesCubit.addBillItem(newItem);
+        }
       }
 
       clearInputs();
+      // Explicitly focus the price field after adding item
+      FocusScope.of(context).requestFocus(priceFocus);
+      _editingItem = null;
     } catch (e) {
       debugPrint('Error managing item: $e');
       if (!mounted) return;
@@ -2097,18 +2826,32 @@ class _CalculatorScreenState extends State<CalculatorScreen>
 
   void _startShortcutEntryTimer() {
     _shortcutEntryTimer?.cancel();
+    debugPrint('Starting shortcut timer for buffer: $_shortcutBuffer');
     _shortcutEntryTimer = Timer(_shortcutEntryTimeout, () {
+      if (!mounted) return;
       if (_shortcutBuffer.isNotEmpty) {
+        debugPrint(
+          'Shortcut timer expired, processing buffer: $_shortcutBuffer',
+        );
         _processShortcutBuffer();
       }
     });
   }
 
   void _processShortcutBuffer() {
-    if (_shortcutBuffer.isEmpty) return;
+    if (_shortcutBuffer.isEmpty) {
+      debugPrint('Shortcut buffer is empty, skipping processing');
+      return;
+    }
 
+    debugPrint('Processing shortcut buffer: $_shortcutBuffer');
     final result = ShortcutValidator.parseShortcut(_shortcutBuffer);
+    debugPrint(
+      'Shortcut parse result: isValid=${result.isValid}, category=${result.category}, code=${result.code}, quantity=${result.quantity}',
+    );
+
     if (!result.isValid) {
+      debugPrint('Invalid shortcut format: ${result.error}');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.error ?? 'Invalid shortcut format'),
@@ -2117,7 +2860,9 @@ class _CalculatorScreenState extends State<CalculatorScreen>
       );
       _shortcutBuffer = '';
       _shortcutEntryTimer?.cancel();
-      setState(() {}); // Only update shortcut UI
+      if (mounted) {
+        setState(() {}); // Only update shortcut UI
+      }
       return;
     }
 
@@ -2129,12 +2874,28 @@ class _CalculatorScreenState extends State<CalculatorScreen>
           .where((i) => i.isSold == false)
           .toList();
     }
-    final InventoryItem? inv = inventoryList.cast<InventoryItem?>().firstWhere(
-      (item) =>
-          (item?.shortcut ?? '').toUpperCase() ==
-          ('${result.category}${result.code}').toUpperCase(),
-      orElse: () => null,
+
+    final searchShortcut = '${result.category}${result.code}'.toUpperCase();
+    debugPrint(
+      'Searching for shortcut: $searchShortcut in ${inventoryList.length} items',
     );
+
+    // Debug: Print all available shortcuts
+    for (var item in inventoryList) {
+      if (item.shortcut != null && item.shortcut!.isNotEmpty) {
+        debugPrint(
+          'Available shortcut: ${item.shortcut!.toUpperCase()} for item: ${item.name}',
+        );
+      }
+    }
+
+    final InventoryItem? inv = inventoryList
+        .cast<InventoryItem?>()
+        .firstWhereOrNull(
+          (item) => (item?.shortcut ?? '').toUpperCase() == searchShortcut,
+        );
+
+    debugPrint('Found inventory item: ${inv?.name ?? 'NOT FOUND'}');
 
     if (inv != null) {
       // Check if item is out of stock
@@ -2147,7 +2908,10 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         );
         _shortcutBuffer = '';
         _shortcutEntryTimer?.cancel();
-        setState(() {}); // Only update shortcut UI
+        debugPrint('Shortcut processing failed - out of stock, buffer cleared');
+        if (mounted) {
+          setState(() {}); // Only update shortcut UI
+        }
         return;
       }
 
@@ -2164,45 +2928,170 @@ class _CalculatorScreenState extends State<CalculatorScreen>
         );
         _shortcutBuffer = '';
         _shortcutEntryTimer?.cancel();
-        setState(() {}); // Only update shortcut UI
+        debugPrint(
+          'Shortcut processing failed - insufficient stock, buffer cleared',
+        );
+        if (mounted) {
+          setState(() {}); // Only update shortcut UI
+        }
         return;
       }
 
       itemNameController.text = inv.name;
       priceValue = inv.price.toStringAsFixed(0);
       priceController.text = priceValue;
+
+      // Clear shortcut buffer after successful processing
+      _shortcutBuffer = '';
+      _shortcutEntryTimer?.cancel();
+      debugPrint('Shortcut processed successfully, buffer cleared');
       quantityValue = requestedQuantity.toStringAsFixed(0);
       quantityController.text = quantityValue;
-      setState(() {}); // Only update shortcut UI
+      if (mounted) {
+        setState(() {}); // Only update shortcut UI
+      }
     } else {
+      debugPrint('No inventory item found for shortcut: $_shortcutBuffer');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('No item found for shortcut $_shortcutBuffer'),
           backgroundColor: Colors.red,
         ),
       );
+      _shortcutBuffer = '';
+      _shortcutEntryTimer?.cancel();
+      debugPrint('Shortcut processing failed - item not found, buffer cleared');
+      if (mounted) {
+        setState(() {}); // Only update shortcut UI
+      }
     }
-
-    _shortcutBuffer = '';
-    _shortcutEntryTimer?.cancel();
-    setState(() {}); // Only update shortcut UI
   }
 
   Future<void> _loadDiscount() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _discount = prefs.getDouble('defaultDiscount') ?? 0.0;
-    });
+    final uid = prefs.getString('current_uid');
+    if (uid == null || uid.isEmpty) {
+      if (mounted) {
+        setState(() => _discount = 0.0);
+      }
+      return;
+    }
+    final settings = await SettingsRepository().getSettings(uid);
+    if (mounted) {
+      setState(() {
+        _discount = settings?.defaultDiscount ?? 0.0;
+      });
+    }
   }
 
   Future<void> _fetchCustomers() async {
-    final customers = await _peopleRepo.getPeopleByCategory('customer');
-    setState(() {
-      _customerList = customers;
-      // If the previously selected customer is not in the new list, clear selection
-      if (_selectedCustomer != null &&
-          !_customerList.any((c) => c.name == _selectedCustomer)) {
-        _selectedCustomer = null;
+    final uid = await getCurrentUserUid();
+    debugPrint('Calculator: getPeopleByCategory fetched UID: $uid');
+    if (uid == null || uid.isEmpty) {
+      // handle error or return empty list
+      return;
+    }
+    final customers = await _peopleRepo.getPeopleByCategory('customer', uid);
+    if (mounted) {
+      setState(() {
+        _customerList = customers;
+        // If the previously selected customer is not in the new list, clear selection
+        if (_selectedCustomer != null &&
+            !_customerList.any((c) => c.name == _selectedCustomer)) {
+          _selectedCustomer = null;
+        }
+      });
+    }
+  }
+
+  void _handleDeleteCartItem(BillItem item) {
+    final salesCubit = context.read<SalesCubit>();
+    salesCubit.removeItem(item);
+    if (mounted) {
+      setState(
+        () {},
+      ); // This will trigger a rebuild and recalculate available qty
+    }
+  }
+
+  void _updateItemNameField() {
+    final salesCubit = context.read<SalesCubit>();
+    final nextSerial = salesCubit.items.length + 1;
+    itemNameController.text = 'Item $nextSerial';
+  }
+
+  String _getNextItemSerialName() {
+    final salesCubit = context.read<SalesCubit>();
+    final nextSerial = salesCubit.items.length + 1;
+    return 'Item $nextSerial';
+  }
+
+  void _updateShortcutPreview() {
+    if (_shortcutBuffer.isEmpty) {
+      // Optionally clear fields if buffer is empty
+      // itemNameController.clear();
+      // priceValue = '';
+      // priceController.clear();
+      // quantityValue = '';
+      // quantityController.clear();
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    final result = ShortcutValidator.parseShortcut(_shortcutBuffer);
+    if (!result.isValid) {
+      // Optionally clear fields if invalid
+      // itemNameController.clear();
+      // priceValue = '';
+      // priceController.clear();
+      // quantityValue = '';
+      // quantityController.clear();
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    final inventoryState = context.read<InventoryCubit>().state;
+    List inventoryList = [];
+    if (inventoryState is InventoryLoaded) {
+      inventoryList = inventoryState.items
+          .where((i) => i.isSold == false)
+          .toList();
+    }
+    final searchShortcut = '${result.category}${result.code}'.toUpperCase();
+    final InventoryItem? inv = inventoryList
+        .cast<InventoryItem?>()
+        .firstWhereOrNull(
+          (item) => (item?.shortcut ?? '').toUpperCase() == searchShortcut,
+        );
+    if (inv != null) {
+      itemNameController.text = inv.name;
+      priceValue = inv.price.toStringAsFixed(0);
+      priceController.text = priceValue;
+      quantityValue = (result.quantity ?? 1.0).toStringAsFixed(0);
+      quantityController.text = quantityValue;
+    } else {
+      // Optionally clear fields if not found
+      // itemNameController.clear();
+      // priceValue = '';
+      // priceController.clear();
+      // quantityValue = '';
+      // quantityController.clear();
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _startShortcutTimer() {
+    _shortcutTimer?.cancel();
+    _shortcutTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (!mounted) return;
+      // Timer expired without a number press - shortcut already handled
+      debugPrint('Shortcut timer expired without number press');
+      if (mounted) {
+        setState(() {}); // Refresh UI to show active state
       }
     });
   }

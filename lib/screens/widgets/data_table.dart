@@ -40,7 +40,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
         // Enhanced data table with better styling
         Container(
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+            color: isDark ? const Color(0xFF013A63) : Colors.white,
             borderRadius: const BorderRadius.only(
               bottomLeft: Radius.circular(20),
               bottomRight: Radius.circular(20),
@@ -68,7 +68,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
               dataTextStyle: GoogleFonts.poppins(
                 fontSize: 10, // smaller font size
                 fontWeight: FontWeight.w500,
-                color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                color: isDark ? Colors.white : Colors.grey.shade700,
               ),
               headingRowColor: MaterialStateProperty.resolveWith(
                 (states) => isDark
@@ -191,7 +191,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
                       vertical: 12,
                     ),
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF232323) : Colors.white,
+                    fillColor: isDark ? Colors.transparent : Colors.white,
                   ),
                   style: GoogleFonts.poppins(
                     color: isDark ? Colors.white : Colors.black87,
@@ -240,20 +240,25 @@ class _DataTableWidgetState extends State<DataTableWidget> {
     );
   }
 
-  Color _getPaymentMethodColor(String method) {
+  Color _getPaymentMethodColor(String method, bool isDark) {
     switch (method.toLowerCase()) {
       case 'cash':
-        return const Color(0xFF1976D2); // Blue
+        return isDark ? Colors.white : Colors.blue.shade600;
+        ; // Blue
       case 'credit':
-        return const Color(0xFF0A2342); // Dark Blue
+        return isDark ? Colors.white : Colors.blue.shade600;
+        ; // Dark Blue
       case 'online':
-        return const Color(0xFF123060); // Blue shade
+        return isDark ? Colors.white : Colors.blue.shade600;
+        ; // Blue shade
       default:
-        return Colors.grey.shade600;
+        return isDark ? Colors.white : Colors.blue.shade600;
+        ;
     }
   }
 
   List<DataRow> _buildRows() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return widget.data.map((row) {
       return DataRow(
         cells: [
@@ -273,7 +278,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: _getTypeColor(row['type'] ?? '').withAlpha(25),
+                color: _getTypeColor(row['type'] ?? '', isDark).withAlpha(25),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -281,7 +286,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
                 style: GoogleFonts.poppins(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: _getTypeColor(row['type'] ?? ''),
+                  color: _getTypeColor(row['type'] ?? '', isDark),
                 ),
               ),
             ),
@@ -302,7 +307,9 @@ class _DataTableWidgetState extends State<DataTableWidget> {
               decoration: BoxDecoration(
                 color: _getPaymentMethodColor(
                   row['payment'] ?? '',
+                  isDark,
                 ).withAlpha(25),
+
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -310,7 +317,7 @@ class _DataTableWidgetState extends State<DataTableWidget> {
                 style: GoogleFonts.poppins(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: _getPaymentMethodColor(row['payment'] ?? ''),
+                  color: _getPaymentMethodColor(row['payment'] ?? '', isDark),
                 ),
               ),
             ),
@@ -337,29 +344,29 @@ class _DataTableWidgetState extends State<DataTableWidget> {
     }).toList();
   }
 
-  Color _getTypeColor(String type) {
+  Color _getTypeColor(String type, bool isDark) {
     switch (type.toLowerCase()) {
       case 'sales':
-        return const Color(0xFF1976D2); // Blue
+        return isDark ? Colors.white : Colors.blue.shade600; // Blue
       case 'purchase':
-        return const Color(0xFF123060); // Blue shade
+        return isDark ? Colors.white : Colors.blue.shade600;
       case 'expense':
-        return const Color(0xFF0A2342); // Dark Blue
+        return isDark ? Colors.white : Colors.blue.shade600; // Dark Blue
       default:
-        return Colors.grey.shade600;
+        return isDark ? Colors.white : Colors.blue.shade600;
     }
   }
+}
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return const Color(0xFF1976D2); // Blue
-      case 'pending':
-        return const Color(0xFFF59E0B); // Amber
-      case 'cancelled':
-        return const Color(0xFFEF4444); // Red
-      default:
-        return Colors.grey.shade600;
-    }
+Color _getStatusColor(String status) {
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return const Color(0xFF1976D2); // Blue
+    case 'pending':
+      return const Color(0xFFF59E0B); // Amber
+    case 'cancelled':
+      return const Color(0xFFEF4444); // Red
+    default:
+      return Colors.grey.shade600;
   }
 }

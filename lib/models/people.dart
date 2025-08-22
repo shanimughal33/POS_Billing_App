@@ -1,5 +1,6 @@
 class People {
-  final int? id;
+  final String? id;
+  final String userId;
   final String name;
   final String phone;
   final String category; // customer, supplier, or custom
@@ -8,10 +9,11 @@ class People {
   final String? description;
   final String? address;
   final String? notes;
-  final int isDeleted;
+  final bool isDeleted;
 
   People({
     this.id,
+    required this.userId,
     required this.name,
     required this.phone,
     required this.category,
@@ -20,41 +22,45 @@ class People {
     this.description,
     this.address,
     this.notes,
-    this.isDeleted = 0,
+    this.isDeleted = false,
   });
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
+      'userId': userId,
       'name': name,
       'phone': phone,
       'category': category,
       'balance': balance,
       'lastTransactionDate': lastTransactionDate.toIso8601String(),
-      'isDeleted': isDeleted,
       'description': description,
       'address': address,
       'notes': notes,
+      'isDeleted': isDeleted,
     };
   }
 
   factory People.fromMap(Map<String, dynamic> map) {
     return People(
-      id: map['id'] as int?,
-      name: map['name'] as String,
-      phone: map['phone'] as String,
-      category: map['category'] as String,
-      balance: (map['balance'] as num).toDouble(),
-      lastTransactionDate: DateTime.parse(map['lastTransactionDate'] as String),
+      id: map['id'], // will be overridden with doc.id in repository
+      userId: map['userId'] ?? '',
+      name: map['name'] ?? '',
+      phone: map['phone'] ?? '',
+      category: map['category'] ?? '',
+      balance: (map['balance'] as num?)?.toDouble() ?? 0.0,
+      lastTransactionDate: map['lastTransactionDate'] != null
+          ? DateTime.tryParse(map['lastTransactionDate']) ?? DateTime.now()
+          : DateTime.now(),
       description: map['description'],
       address: map['address'],
       notes: map['notes'],
-      isDeleted: map['isDeleted'] == null ? 0 : (map['isDeleted'] as int),
+      isDeleted: map['isDeleted'] ?? false,
     );
   }
 
   People copyWith({
-    int? id,
+    String? id,
+    String? userId,
     String? name,
     String? phone,
     String? category,
@@ -63,10 +69,11 @@ class People {
     String? description,
     String? address,
     String? notes,
-    int? isDeleted,
+    bool? isDeleted,
   }) {
     return People(
       id: id ?? this.id,
+      userId: userId ?? this.userId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
       category: category ?? this.category,

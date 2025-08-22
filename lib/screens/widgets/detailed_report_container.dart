@@ -69,7 +69,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             child: Container(
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+                color: isDark ? const Color(0xFF0A2342) : Colors.white,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
@@ -101,7 +101,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF013A63) : Colors.white,
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(24),
           topRight: Radius.circular(24),
@@ -124,23 +124,12 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
               style: GoogleFonts.poppins(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF0A2342),
+                color: isDark ? Colors.white : Color(0xFF0A2342),
                 letterSpacing: 0.5,
               ),
             ),
           ),
-          IconButton(
-            onPressed: () {
-              _animationController.reverse().then((_) {
-                widget.onClose();
-              });
-            },
-            icon: const Icon(
-              Icons.close_rounded,
-              color: Color(0xFF1976D2),
-              size: 24,
-            ),
-          ),
+          
         ],
       ),
     );
@@ -166,7 +155,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
       margin: const EdgeInsets.symmetric(horizontal: 0),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -264,7 +253,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
           height: 320,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+            color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -348,7 +337,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
           height: 320,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+            color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -416,10 +405,10 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
               color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
             ),
           ),
-          child: _buildMonthlyExpensesChart(
+          child: _buildDailyExpensesChart(
             context,
             isDark,
-            data['monthlyExpenses'] ?? [],
+            data['dailyExpenses'] ?? [],
           ),
         ),
 
@@ -492,12 +481,15 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   }
 
   Widget _buildSectionTitle(BuildContext context, bool isDark, String title) {
-    return Text(
-      title,
-      style: GoogleFonts.poppins(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: isDark ? Colors.white : Colors.black87,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 4.0),
+      child: Text(
+        title,
+        style: GoogleFonts.poppins(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white : Colors.black87,
+        ),
       ),
     );
   }
@@ -560,7 +552,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
     );
   }
 
-  Widget _buildMonthlyExpensesChart(
+  Widget _buildDailyExpensesChart(
     BuildContext context,
     bool isDark,
     List<dynamic> data,
@@ -577,7 +569,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
     }).toList();
 
     final labels = data
-        .map((item) => (item['month'] ?? '').toString())
+        .map((item) => (item['date'] ?? '').toString())
         .toList();
 
     return SizedBox(
@@ -598,7 +590,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -623,7 +615,10 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               product['name'] ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             trailing: Text(
               'Rs ${(product['sales'] ?? 0.0).toStringAsFixed(2)}',
@@ -645,7 +640,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -670,7 +665,10 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               category['name'] ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             trailing: Text(
               '${category['count'] ?? 0} items',
@@ -692,7 +690,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -715,11 +713,18 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               item.name ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             subtitle: Text(
               'Qty: ${item.quantity ?? 0}',
-              style: GoogleFonts.poppins(color: Colors.grey.shade600),
+              style: GoogleFonts.poppins(
+                color: isDark
+                    ? Colors.white.withOpacity(0.8)
+                    : Colors.grey.shade600,
+              ),
             ),
             trailing: Text(
               'Rs ${(item.price ?? 0.0).toStringAsFixed(2)}',
@@ -885,7 +890,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -910,7 +915,10 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               customer['name'] ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             trailing: Text(
               'Rs ${(customer['sales'] ?? 0.0).toStringAsFixed(2)}',
@@ -938,11 +946,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
-        ),
+        color: isDark ? Colors.transparent : Colors.grey.shade50,
       ),
       child: Column(
         children: [
@@ -1016,7 +1020,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade800 : Colors.white,
+        color: isDark ? Colors.transparent : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withAlpha(51), width: 1),
       ),
@@ -1055,7 +1059,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -1078,11 +1082,18 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               bill.customerName ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             subtitle: Text(
               DateFormat('MMM dd, yyyy').format(bill.date),
-              style: GoogleFonts.poppins(color: Colors.grey.shade600),
+              style: GoogleFonts.poppins(
+                color: isDark
+                    ? Colors.white.withOpacity(0.8)
+                    : Colors.grey.shade600,
+              ),
             ),
             trailing: Text(
               'Rs ${(bill.total ?? 0.0).toStringAsFixed(2)}',
@@ -1104,7 +1115,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -1127,20 +1138,29 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               expense.description ?? '',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   expense.category ?? '',
-                  style: GoogleFonts.poppins(color: Colors.grey.shade600),
+                  style: GoogleFonts.poppins(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.8)
+                        : Colors.grey.shade600,
+                  ),
                 ),
                 Text(
                   '${expense.paymentMethod ?? ''}  |  ${expense.date != null ? DateFormat('MMM dd, yyyy').format(expense.date) : ''}',
                   style: GoogleFonts.poppins(
                     fontSize: 11,
-                    color: Colors.grey.shade500,
+                    color: isDark
+                        ? Colors.white.withOpacity(0.6)
+                        : Colors.grey.shade500,
                   ),
                 ),
               ],
@@ -1165,7 +1185,7 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? const Color(0xFF013A63) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -1188,11 +1208,18 @@ class _DetailedReportContainerState extends State<DetailedReportContainer>
             ),
             title: Text(
               person.name,
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
             ),
             subtitle: Text(
               person.category,
-              style: GoogleFonts.poppins(color: Colors.grey.shade600),
+              style: GoogleFonts.poppins(
+                color: isDark
+                    ? Colors.white.withOpacity(0.8)
+                    : Colors.grey.shade600,
+              ),
             ),
             trailing: Text(
               person.phone ?? '',

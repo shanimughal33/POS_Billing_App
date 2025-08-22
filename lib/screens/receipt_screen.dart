@@ -6,10 +6,10 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/bill_item.dart';
 import '../widgets/pos_receipt.dart';
+import '../utils/business_info.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import '../utils/business_info.dart';
 
 class ReceiptScreen extends StatelessWidget {
   final List<BillItem> items;
@@ -18,6 +18,7 @@ class ReceiptScreen extends StatelessWidget {
   final String paymentMethod;
   final DateTime dateTime;
   final int billNumber;
+  final double discount;
 
   const ReceiptScreen({
     super.key,
@@ -27,6 +28,7 @@ class ReceiptScreen extends StatelessWidget {
     required this.paymentMethod,
     required this.dateTime,
     required this.billNumber,
+    required this.discount,
   });
 
   Future<void> _shareBill() async {
@@ -60,17 +62,132 @@ class ReceiptScreen extends StatelessWidget {
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return FutureBuilder<BusinessInfo>(
+      key: ValueKey(isDark), // Force reload on theme change
+      future: BusinessInfo.load(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final businessInfo = snapshot.data!;
+        return Scaffold(
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0A2342)
+              : Colors.white,
+          appBar: AppBar(
+            backgroundColor: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF0A2342)
+                : Colors.white,
+            title: Text(
+              'Bill #${billNumber.toString().padLeft(6, '0')}',
+              style: Theme.of(context).brightness == Brightness.dark
+                  ? Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(color: Colors.white)
+                  : Theme.of(context).textTheme.titleLarge,
+            ),
+            leading: IconButton(
+              icon: Icon(
+                Icons.arrow_back_ios,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : const Color(0xFF0A2342),
+                size: 20,
+              ),
+              onPressed: () => Navigator.pop(context),
+            ),
+            actions: [
+              IconButton(
+                icon: Icon(
+                  Icons.print,
+                  color: isDark ? Colors.white : Color(0xFF0A2342),
+                ),
+                onPressed: _printReceipt,
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.share,
+                  color: isDark ? Colors.white : Color(0xFF0A2342),
+                ),
+                onPressed: _shareBill,
+              ),
+            ],
+          ),
+          body: SingleChildScrollView(
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 500),
+                margin: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withAlpha(76),
+                      spreadRadius: 1,
+                      blurRadius: 5,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: POSReceipt(
+                  items: items,
+                  total: total,
+                  customerName: customerName,
+                  paymentMethod: paymentMethod,
+                  dateTime: dateTime,
+                  billNumber: billNumber,
+                  businessInfo: businessInfo,
+                  discount: discount,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   pw.Widget _buildReceiptPdf(BusinessInfo businessInfo) {
     final subtotal = items.fold(0.0, (sum, item) => sum + item.total);
+    double discountAmount = 0.0;
+    String discountLabel = 'Discount:';
+    if (discount > 0) {
+      double percent = discount;
+      if (discount <= 1.0) {
+        percent = discount;
+        discountLabel = 'Discount (${(discount * 100).toStringAsFixed(0)}%):';
+      } else {
+        percent = discount / 100.0;
+        discountLabel = 'Discount (${discount.toStringAsFixed(0)}%):';
+      }
+      discountAmount = subtotal * percent;
+    }
     final taxRate = double.tryParse(businessInfo.taxRate) ?? 0.0;
-    final taxAmount = subtotal * (taxRate / 100);
-    final grandTotal = subtotal + taxAmount;
+    final taxAmount = (subtotal - discountAmount) * (taxRate / 100);
+    final grandTotal = subtotal - discountAmount + taxAmount;
     // When displaying business info in the receipt, use sample data if the value is empty or not set:
-    final businessName = businessInfo.name.isNotEmpty ? businessInfo.name : 'Sample Business';
-    final businessAddress = businessInfo.address.isNotEmpty ? businessInfo.address : '123 Main St, City';
-    final businessPhone = businessInfo.phone.isNotEmpty ? businessInfo.phone : '123-456-7890';
-    final businessEmail = businessInfo.email.isNotEmpty ? businessInfo.email : 'sample@email.com';
-    final supportPhone = businessInfo.supportPhone?.isNotEmpty == true ? businessInfo.supportPhone! : businessPhone;
+    final businessName = businessInfo.name.isNotEmpty
+        ? businessInfo.name
+        : 'Sample Business';
+    final businessAddress = businessInfo.address.isNotEmpty
+        ? businessInfo.address
+        : '123 Main St, City';
+    final businessPhone = businessInfo.phone.isNotEmpty
+        ? businessInfo.phone
+        : '123-456-7890';
+    final businessEmail = businessInfo.email.isNotEmpty
+        ? businessInfo.email
+        : 'sample@email.com';
+    final supportPhone = businessInfo.supportPhone.isNotEmpty == true
+        ? businessInfo.supportPhone
+        : businessPhone;
     // Use these variables wherever business info is displayed in the receipt.
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -141,21 +258,21 @@ class ReceiptScreen extends StatelessWidget {
         _asciiDividerPdf(),
         pw.SizedBox(height: 10),
         // Replace the row for Bill # and Date with two separate lines:
-            pw.Text(
-              'Bill #: ${billNumber.toString().padLeft(6, '0')}',
-              style: pw.TextStyle(
-                font: pw.Font.courier(),
-                fontSize: 15,
-                color: PdfColors.black,
-              ),
-            ),
-            pw.Text(
-              _formatDate(dateTime),
-              style: pw.TextStyle(
-                font: pw.Font.courier(),
-                fontSize: 15,
-                color: PdfColors.black,
-              ),
+        pw.Text(
+          'Bill #: ${billNumber.toString().padLeft(6, '0')}',
+          style: pw.TextStyle(
+            font: pw.Font.courier(),
+            fontSize: 15,
+            color: PdfColors.black,
+          ),
+        ),
+        pw.Text(
+          _formatDate(dateTime),
+          style: pw.TextStyle(
+            font: pw.Font.courier(),
+            fontSize: 15,
+            color: PdfColors.black,
+          ),
         ),
         pw.SizedBox(height: 6),
         pw.Row(
@@ -217,6 +334,20 @@ class ReceiptScreen extends StatelessWidget {
             ),
           ],
         ),
+        if (discount > 0)
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                discountLabel,
+                style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+              ),
+              pw.Text(
+                '-${businessInfo.currency} ${discountAmount.toStringAsFixed(2)}',
+                style: pw.TextStyle(font: pw.Font.courier(), fontSize: 15),
+              ),
+            ],
+          ),
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
@@ -332,7 +463,7 @@ class ReceiptScreen extends StatelessWidget {
                           ),
                           pw.SizedBox(height: 2),
                           pw.Text(
-                            '@ Rs ${item.price.toStringAsFixed(0)} each',
+                            '@ Rs ${item.priceAsInt} each',
                             style: pw.TextStyle(
                               font: pw.Font.courier(),
                               fontSize: 15,
@@ -344,7 +475,7 @@ class ReceiptScreen extends StatelessWidget {
                     ),
                     pw.Center(
                       child: pw.Text(
-                        item.quantity.toStringAsFixed(0),
+                        item.quantityAsInt.toString(),
                         style: pw.TextStyle(
                           font: pw.Font.courier(),
                           fontSize: 14,
@@ -660,80 +791,5 @@ class ReceiptScreen extends StatelessWidget {
   String _formatDate(DateTime dateTime) {
     // Implement date formatting logic based on the dateTime
     return dateTime.toString();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<BusinessInfo>(
-      future: BusinessInfo.load(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final businessInfo = snapshot.data!;
-        return Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: AppBar(
-            backgroundColor: Theme.of(context).cardColor,
-            title: Text(
-              'Bill #${billNumber.toString().padLeft(6, '0')}',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            leading: IconButton(
-              icon: const Icon(
-                Icons.arrow_back_ios,
-                color: Color(0xFF0A2342),
-                size: 20,
-              ),
-              onPressed: () => Navigator.pop(context),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.print, color: Color(0xFF0A2342)),
-                onPressed: _printReceipt,
-              ),
-              IconButton(
-                icon: const Icon(Icons.share, color: Color(0xFF0A2342)),
-                onPressed: _shareBill,
-              ),
-            ],
-          ),
-          body: SingleChildScrollView(
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 500),
-                margin: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withAlpha(76),
-                      spreadRadius: 1,
-                      blurRadius: 5,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: POSReceipt(
-                  items: items,
-                  total: total,
-                  customerName: customerName,
-                  paymentMethod: paymentMethod,
-                  dateTime: dateTime,
-                  billNumber: billNumber,
-                  businessInfo: businessInfo,
-                  discount: (businessInfo.enableDiscounts
-                      ? (businessInfo.defaultDiscount ?? 0.0)
-                      : 0.0),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
   }
 }

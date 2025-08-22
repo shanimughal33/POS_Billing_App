@@ -258,12 +258,12 @@ class _ComparisonChartWidgetState extends State<ComparisonChartWidget> {
     final minY = _getMinY();
     final maxY = _getMaxY();
     final baseWidth = (_filteredLabels.length + 1) * 60.0;
-    final chartWidth = baseWidth.clamp(500.0, 1200.0);
+    final chartWidth = baseWidth.clamp(600.0, 1200.0);
 
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 340, maxHeight: 380),
-      padding: const EdgeInsets.fromLTRB(12, 20, 12, 12), // Extra top padding
+      constraints: const BoxConstraints(minHeight: 360, maxHeight: 400),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16), // Increased padding
       decoration: BoxDecoration(
         gradient: bgGradient,
         borderRadius: BorderRadius.circular(18),
@@ -283,11 +283,14 @@ class _ComparisonChartWidgetState extends State<ComparisonChartWidget> {
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
         child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: 500, maxWidth: chartWidth),
+          constraints: BoxConstraints(
+            minWidth: 600,
+            maxWidth: chartWidth,
+          ),
           child: Container(
             width: chartWidth,
-            height: 280,
-            padding: const EdgeInsets.only(right: 40, top: 8),
+            height: 300,
+            padding: const EdgeInsets.fromLTRB(20, 16, 40, 20),
             child: LineChart(
               LineChartData(
                 minY: minY,
@@ -312,14 +315,15 @@ class _ComparisonChartWidgetState extends State<ComparisonChartWidget> {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 36,
+                      reservedSize: 50, // Increased to prevent clipping
                       interval: maxY > 0 ? maxY / 4 : 1,
                       getTitlesWidget: (value, meta) {
                         return Padding(
                           padding: const EdgeInsets.only(
-                            right: 6,
-                            top: 2,
-                            bottom: 2,
+                            right: 8,
+                            left: 4,
+                            top: 4,
+                            bottom: 4,
                           ),
                           child: Text(
                             value.toInt().toString(),
@@ -337,13 +341,13 @@ class _ComparisonChartWidgetState extends State<ComparisonChartWidget> {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 24,
+                      reservedSize: 30, // Increased for better spacing
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         final idx = value.toInt();
                         if (idx >= 0 && idx < _filteredLabels.length) {
                           return Padding(
-                            padding: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.only(top: 8, bottom: 4),
                             child: Text(
                               _filteredLabels[idx],
                               style: GoogleFonts.montserrat(

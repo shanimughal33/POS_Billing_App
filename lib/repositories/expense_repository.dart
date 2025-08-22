@@ -1,77 +1,176 @@
-import '../models/expense.dart';
-import '../database/database_helper.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import '../models/expense.dart';
 
 class ExpenseRepository extends ChangeNotifier {
-  final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<int> insertExpense(Expense expense) async {
-    final db = await _dbHelper.database;
-    return await db.insert('expenses', expense.toMap());
+  ExpenseRepository() {
+    // Enable offline persistence
+    _firestore.settings = const Settings(persistenceEnabled: true);
   }
 
-  Future<List<Expense>> getAllExpenses() async {
-    final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'expenses',
-      orderBy: 'date DESC',
-    );
-    return List.generate(maps.length, (i) => Expense.fromMap(maps[i]));
+  /// Real-time stream of all expenses for a user
+  Stream<List<Expense>> streamExpenses(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => Expense.fromMap(doc.data(), docId: doc.id))
+              .toList(),
+        );
   }
 
-  Future<List<Expense>> getExpensesByCategory(String category) async {
-    final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'expenses',
-      where: 'category = ?',
-      whereArgs: [category],
-      orderBy: 'date DESC',
+  /// Insert without waiting for Firestore (offline safe)
+  Future<void> insertExpense(Expense expense) async {
+    debugPrint(
+      'ExpenseRepository: insertExpense for userId=${expense.userId}, expense=$expense',
     );
-    return List.generate(maps.length, (i) => Expense.fromMap(maps[i]));
+
+    _firestore
+        .collection('users')
+        .doc(expense.userId)
+        .collection('expenses')
+        .add(expense.toMap())
+        .catchError((e) => debugPrint('Insert error: $e'));
+
+    notifyListeners();
   }
 
-  Future<Expense?> getExpenseById(int id) async {
-    final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'expenses',
-      where: 'id = ?',
-      whereArgs: [id],
+  /// Fetch all expenses (blocking)
+  Future<List<Expense>> getAllExpenses(String userId) async {
+    debugPrint('ExpenseRepository: getAllExpenses for userId=$userId');
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .orderBy('date', descending: true)
+        .get();
+
+    return snapshot.docs
+        .map((doc) => Expense.fromMap(doc.data(), docId: doc.id))
+        .toList();
+  }
+
+  /// Get expenses by category (blocking)
+  Future<List<Expense>> getExpensesByCategory(
+    String category,
+    String userId,
+  ) async {
+    debugPrint(
+      'ExpenseRepository: getExpensesByCategory for userId=$userId, category=$category',
     );
-    if (maps.isNotEmpty) {
-      return Expense.fromMap(maps.first);
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .where('category', isEqualTo: category)
+        .orderBy('date', descending: true)
+        .get();
+
+    return snapshot.docs
+        .map((doc) => Expense.fromMap(doc.data(), docId: doc.id))
+        .toList();
+  }
+
+  /// Get single expense by ID (blocking)
+  Future<Expense?> getExpenseById(String expenseId, String userId) async {
+    debugPrint(
+      'ExpenseRepository: getExpenseById for userId=$userId, id=$expenseId',
+    );
+    final doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .doc(expenseId)
+        .get();
+
+    if (doc.exists) {
+      return Expense.fromMap(doc.data()!, docId: doc.id);
     }
     return null;
   }
 
-  Future<int> updateExpense(Expense expense) async {
-    final db = await _dbHelper.database;
-    return await db.update(
-      'expenses',
-      expense.toMap(),
-      where: 'id = ?',
-      whereArgs: [expense.id],
+  /// Update expense — fire & forget
+  Future<void> updateExpense(Expense expense) async {
+    if (expense.id == null) {
+      debugPrint('updateExpense failed: id is null');
+      return;
+    }
+
+    debugPrint(
+      'ExpenseRepository: updateExpense for userId=${expense.userId}, expense=$expense',
     );
+
+    _firestore
+        .collection('users')
+        .doc(expense.userId)
+        .collection('expenses')
+        .doc(expense.id)
+        .update(expense.toMap())
+        .catchError((e) => debugPrint('Update error: $e'));
+
+    notifyListeners();
   }
 
-  Future<int> deleteExpense(int id) async {
-    final db = await _dbHelper.database;
-    return await db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+  /// Delete expense — fire & forget
+  Future<void> deleteExpense(String id, String userId) async {
+    debugPrint('ExpenseRepository: deleteExpense for userId=$userId, id=$id');
+
+    _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .doc(id)
+        .delete()
+        .catchError((e) => debugPrint('Delete error: $e'));
+
+    notifyListeners();
   }
 
-  Future<double> getTotalExpenses() async {
-    final db = await _dbHelper.database;
-    final result = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM expenses',
-    );
-    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
+  /// Calculate total expenses
+  Future<double> getTotalExpenses(String userId) async {
+    debugPrint('ExpenseRepository: getTotalExpenses for userId=$userId');
+
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .get();
+
+    double total = 0.0;
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      total += (data['amount'] as num?)?.toDouble() ?? 0.0;
+    }
+    return total;
   }
 
-  Future<double> getTotalExpensesByCategory(String category) async {
-    final db = await _dbHelper.database;
-    final result = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM expenses WHERE category = ?',
-      [category],
+  /// Total by category
+  Future<double> getTotalExpensesByCategory(
+    String category,
+    String userId,
+  ) async {
+    debugPrint(
+      'ExpenseRepository: getTotalExpensesByCategory for userId=$userId, category=$category',
     );
-    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
+
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('expenses')
+        .where('category', isEqualTo: category)
+        .get();
+
+    double total = 0.0;
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      total += (data['amount'] as num?)?.toDouble() ?? 0.0;
+    }
+    return total;
   }
 }

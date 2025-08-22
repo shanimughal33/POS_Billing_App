@@ -1,8 +1,8 @@
 // ignore_for_file: unrelated_type_equality_checks
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../repositories/bill_repository.dart';
@@ -31,14 +31,60 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/auth_utils.dart';
+import '../utils/refresh_manager.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:async';
 
 const Color accentGreen = Color(0xFF128C7E); // WhatsApp green
 
 class ReportProvider with ChangeNotifier {
-  final BillRepository _billRepo = BillRepository();
-  final InventoryRepository _inventoryRepo = InventoryRepository();
-  final PeopleRepository _peopleRepo = PeopleRepository();
-  final ExpenseRepository _expenseRepo = ExpenseRepository();
+  bool _disposed = false;
+  final BillRepository billRepo;
+  final InventoryRepository inventoryRepo;
+  final PeopleRepository peopleRepo;
+  final ExpenseRepository expenseRepo;
+  RefreshManager? refreshManager;
+  // Optional initial data to render instantly before streams emit
+  final List<Bill>? initialBills;
+  final List<InventoryItem>? initialInventory;
+  final List<People>? initialPeople;
+  final List<Expense>? initialExpenses;
+
+  ReportProvider({
+    required this.billRepo,
+    required this.inventoryRepo,
+    required this.peopleRepo,
+    required this.expenseRepo,
+    this.refreshManager,
+    this.initialBills,
+    this.initialInventory,
+    this.initialPeople,
+    this.initialExpenses,
+  }) {
+    // Seed from provided initial data for instant UI
+    if (initialBills != null) _allBills = List<Bill>.from(initialBills!);
+    if (initialInventory != null) {
+      _inventory = List<InventoryItem>.from(initialInventory!);
+    }
+    if (initialPeople != null) _peoples = List<People>.from(initialPeople!);
+    if (initialExpenses != null) _expenses = List<Expense>.from(initialExpenses!);
+    if (initialBills != null || initialInventory != null || initialPeople != null || initialExpenses != null) {
+      isLoading = false; // We can show something instantly
+      _recomputeAll();
+    }
+    _initializeData();
+  }
+
+  // Recompute all derived data from current in-memory lists.
+  void _recomputeAll() {
+    _calculateKPIs();
+    _generateChartData();
+    _generateComparisonChartData();
+    _generateTableData();
+    _generateDetailedSummaries();
+  }
 
   bool isLoading = true;
   bool hasError = false;
@@ -52,6 +98,119 @@ class ReportProvider with ChangeNotifier {
   double revenueChange = 0;
   double expenseChange = 0;
   double profitChange = 0;
+
+  // Stream subscriptions
+  StreamSubscription<List<Bill>>? _billsSub;
+  StreamSubscription<List<InventoryItem>>? _inventorySub;
+  StreamSubscription<List<People>>? _peopleSub;
+  StreamSubscription<List<Expense>>? _expensesSub;
+  
+
+  Future<void> _initializeData() async {
+    try {
+      isLoading = true;
+      hasError = false;
+      errorMessage = '';
+      safeNotifyListeners();
+
+      // Get UID and subscribe to streams
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getString('current_uid');
+      debugPrint('ReportProvider: init streams with UID: $uid');
+
+      if (uid == null || uid.isEmpty) {
+        // No user yet; show empty state instantly
+        _attachEmptyData();
+        isLoading = false;
+        safeNotifyListeners();
+        return;
+      }
+
+      _subscribeToStreams(uid);
+
+      // Non-blocking enrichment for bill items used in top-products/avg-items
+      // Keep UI instant; this completes in background and triggers recompute
+      unawaited(_loadAllBillItemsInBackground(uid));
+    } catch (e) {
+      debugPrint('Error initializing ReportProvider: $e');
+      hasError = true;
+      errorMessage = 'Failed to initialize data: $e';
+      isLoading = false;
+      safeNotifyListeners();
+    }
+  }
+
+  void _attachEmptyData() {
+    _allBills = [];
+    _allBillItems = [];
+    _inventory = [];
+    _peoples = [];
+    _expenses = [];
+    _recomputeAll();
+  }
+
+  void _subscribeToStreams(String uid) {
+    // Cancel previous if any
+    _billsSub?.cancel();
+    _inventorySub?.cancel();
+    _peopleSub?.cancel();
+    _expensesSub?.cancel();
+
+    _billsSub = billRepo.streamBills(uid).listen((bills) {
+      _allBills = bills;
+      _recomputeAll();
+      if (isLoading) {
+        isLoading = false; // First data arrived -> render instantly
+      }
+      safeNotifyListeners();
+    }, onError: (e) {
+      _handleStreamError(e);
+    });
+
+    _inventorySub = inventoryRepo.streamItems(uid).listen((items) {
+      _inventory = items;
+      _recomputeAll();
+      safeNotifyListeners();
+    }, onError: (e) {
+      _handleStreamError(e);
+    });
+
+    _peopleSub = peopleRepo.getPeopleStream(uid).listen((people) {
+      _peoples = people;
+      _recomputeAll();
+      safeNotifyListeners();
+    }, onError: (e) {
+      _handleStreamError(e);
+    });
+
+    _expensesSub = expenseRepo.streamExpenses(uid).listen((expenses) {
+      _expenses = expenses;
+      _recomputeAll();
+      safeNotifyListeners();
+    }, onError: (e) {
+      _handleStreamError(e);
+    });
+  }
+
+  void _handleStreamError(Object e) {
+    debugPrint('ReportProvider stream error: $e');
+    hasError = true;
+    errorMessage = 'Failed to load data: $e';
+    isLoading = false;
+    safeNotifyListeners();
+  }
+
+  Future<void> _loadAllBillItemsInBackground(String uid) async {
+    try {
+      final items = await billRepo.getAllBillItemsForUser(uid);
+      _allBillItems = items;
+      _recomputeAll();
+      safeNotifyListeners();
+    } catch (e) {
+      debugPrint('ReportProvider: background bill items load failed: $e');
+      // Do not flip hasError to avoid impacting main UI; keep best-effort
+    }
+  }
 
   // Chart data
   List<FlSpot> lineChartData = [];
@@ -81,23 +240,64 @@ class ReportProvider with ChangeNotifier {
   Map<String, dynamic> expenseSummary = {};
   Map<String, dynamic> peopleSummary = {};
 
-  ReportProvider() {
-    _loadData();
+  // Removed duplicate unnamed constructor to fix compile error
+
+  void setRefreshManager(RefreshManager rm) {
+    refreshManager = rm;
+    refreshManager!.addListener(_onRefreshRequested);
+  }
+
+  void _onRefreshRequested() {
+    debugPrint(
+      'ReportProvider: _onRefreshRequested called - shouldRefreshReports: ${refreshManager?.shouldRefreshReports}',
+    );
+    if (refreshManager != null && refreshManager!.shouldRefreshReports) {
+      debugPrint('ReportProvider: Refresh requested, reloading data');
+      _loadData();
+      refreshManager!.clearReportsRefresh();
+    }
   }
 
   Future<void> _loadData() async {
+    debugPrint('ReportProvider: _loadData called');
     try {
       isLoading = true;
       hasError = false;
       errorMessage = '';
       notifyListeners();
 
-      // Fetch all data
-      _allBills = await _billRepo.getAllBills();
-      _allBillItems = await _billRepo.getAllBillItems();
-      _inventory = await _inventoryRepo.getAllItems();
-      _peoples = await _peopleRepo.getAllPeople();
-      _expenses = await _expenseRepo.getAllExpenses();
+      // Fetch UID once for all queries
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getString('current_uid');
+      debugPrint('ReportProvider: _loadData fetched UID: $uid');
+
+      // Fetch all data for this user
+      _allBills = uid != null ? await billRepo.getAllBills(uid) : <Bill>[];
+      debugPrint(
+        'ReportProvider: fetched ${_allBills.length} bills for UID: $uid',
+      );
+      _allBillItems = uid != null
+          ? await billRepo.getAllBillItemsForUser(uid)
+          : <BillItem>[];
+      debugPrint(
+        'ReportProvider: fetched ${_allBillItems.length} bill items for UID: $uid',
+      );
+      _inventory = uid != null
+          ? await inventoryRepo.getAllItems(uid)
+          : <InventoryItem>[];
+      debugPrint(
+        'ReportProvider: fetched ${_inventory.length} inventory items for UID: $uid',
+      );
+      _peoples = uid != null ? await peopleRepo.getAllPeople(uid) : <People>[];
+      debugPrint(
+        'ReportProvider: fetched ${_peoples.length} people for UID: $uid',
+      );
+      _expenses = uid != null
+          ? await expenseRepo.getAllExpenses(uid)
+          : <Expense>[];
+      debugPrint(
+        'ReportProvider: fetched ${_expenses.length} expenses for UID: $uid',
+      );
 
       // Calculate KPIs
       _calculateKPIs();
@@ -115,12 +315,13 @@ class ReportProvider with ChangeNotifier {
       _generateDetailedSummaries();
 
       isLoading = false;
-      notifyListeners();
+      debugPrint('ReportProvider: _loadData completed successfully');
+      safeNotifyListeners();
     } catch (e) {
       errorMessage = 'Failed to load data. Please try again.';
       hasError = true;
       isLoading = false;
-      notifyListeners();
+      safeNotifyListeners();
     }
   }
 
@@ -244,7 +445,14 @@ class ReportProvider with ChangeNotifier {
   }
 
   void _generateTableData() {
-    tableData = _allBills.map((bill) {
+    // Sort bills by date (most recent first) without string parsing
+    final sortedBills = List<Bill>.from(_allBills)
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    // Cap to first 500 to keep UI snappy; full export can use repositories
+    final limited = sortedBills.take(500);
+
+    tableData = limited.map((bill) {
       // Get bill items for this bill
       final billItems = _allBillItems
           .where((item) => item.billId == bill.id)
@@ -264,13 +472,6 @@ class ReportProvider with ChangeNotifier {
         'status': 'Completed',
       };
     }).toList();
-
-    // Sort by date (most recent first)
-    tableData.sort(
-      (a, b) => DateFormat(
-        'MMM dd, yyyy',
-      ).parse(b['date']).compareTo(DateFormat('MMM dd, yyyy').parse(a['date'])),
-    );
 
     // Ensure we have at least one row to prevent crashes
     if (tableData.isEmpty) {
@@ -336,7 +537,8 @@ class ReportProvider with ChangeNotifier {
           : _expenses.fold(0.0, (sum, exp) => sum + exp.amount) /
                 _expenses.length,
       'expenseCategories': _getExpenseCategories(),
-      'monthlyExpenses': _getMonthlyExpenseData(),
+      // switched to daily to align with sales and purchase charts
+      'dailyExpenses': _getDailyExpenseData(),
       'recentExpenses': _expenses.take(10).toList(),
     };
 
@@ -422,6 +624,25 @@ class ReportProvider with ChangeNotifier {
     return dailyData;
   }
 
+  List<Map<String, dynamic>> _getDailyExpenseData() {
+    final dailyData = <Map<String, dynamic>>[];
+    final now = DateTime.now();
+
+    for (int i = 6; i >= 0; i--) {
+      final date = now.subtract(Duration(days: i));
+      final dayExpense = _expenses
+          .where((exp) => _isSameDay(exp.date, date))
+          .fold(0.0, (sum, exp) => sum + exp.amount);
+
+      dailyData.add({
+        'date': DateFormat('MMM dd').format(date),
+        'expenses': dayExpense,
+      });
+    }
+
+    return dailyData;
+  }
+
   Map<String, double> _getExpenseCategories() {
     final categories = <String, double>{};
     for (final expense in _expenses) {
@@ -431,26 +652,7 @@ class ReportProvider with ChangeNotifier {
     return categories;
   }
 
-  List<Map<String, dynamic>> _getMonthlyExpenseData() {
-    final monthlyData = <Map<String, dynamic>>[];
-    final now = DateTime.now();
-
-    for (int i = 5; i >= 0; i--) {
-      final date = DateTime(now.year, now.month - i, 1);
-      final monthExpenses = _expenses
-          .where(
-            (exp) => exp.date.year == date.year && exp.date.month == date.month,
-          )
-          .fold(0.0, (sum, exp) => sum + exp.amount);
-
-      monthlyData.add({
-        'month': DateFormat('MMM yyyy').format(date),
-        'expenses': monthExpenses,
-      });
-    }
-
-    return monthlyData;
-  }
+  // Removed monthly expense aggregation to avoid unused code and switch to daily trends
 
   List<Map<String, dynamic>> _getTopCustomers() {
     final customerSales = <String, double>{};
@@ -528,7 +730,14 @@ class ReportProvider with ChangeNotifier {
   }
 
   Future<void> refreshData() async {
-    await _loadData();
+    // Streams keep data fresh; only refresh heavy bill items in background
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getString('current_uid');
+      if (uid != null && uid.isNotEmpty) {
+        unawaited(_loadAllBillItemsInBackground(uid));
+      }
+    } catch (_) {}
   }
 
   void setChartType(String type) {
@@ -629,6 +838,26 @@ class ReportProvider with ChangeNotifier {
     final totalItems = _allBillItems.length;
     return totalItems / _allBills.length;
   }
+
+  @override
+  @override
+  void dispose() {
+    _disposed = true;
+    // Cancel stream subscriptions
+    _billsSub?.cancel();
+    _inventorySub?.cancel();
+    _peopleSub?.cancel();
+    _expensesSub?.cancel();
+    if (refreshManager != null) {
+      refreshManager!.removeListener(_onRefreshRequested);
+      refreshManager = null;
+    }
+    super.dispose();
+  }
+
+  void safeNotifyListeners() {
+    if (!_disposed) notifyListeners();
+  }
 }
 
 class ReportScreen extends StatefulWidget {
@@ -641,12 +870,33 @@ class ReportScreen extends StatefulWidget {
 
 class _ReportScreenState extends State<ReportScreen> {
   String? selectedDetailedReport;
+  RefreshManager? refreshManager;
 
   @override
   void initState() {
     super.initState();
-    // Use widget.selectedDetailedReport if provided
     selectedDetailedReport = widget.selectedDetailedReport;
+
+    // Set up refresh manager after the widget is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      refreshManager = Provider.of<RefreshManager>(context, listen: false);
+      refreshManager!.addListener(_onRefreshRequested);
+      Provider.of<ReportProvider>(
+        context,
+        listen: false,
+      )!.setRefreshManager(refreshManager!);
+    });
+  }
+
+  void _onRefreshRequested() {
+    if (refreshManager != null && refreshManager!.shouldRefreshReports) {
+      debugPrint('ReportScreen: Refresh requested, reloading data');
+      setState(() {
+        // Trigger rebuild of the screen
+      });
+      refreshManager!.clearReportsRefresh();
+    }
   }
 
   @override
@@ -671,6 +921,21 @@ class _ReportScreenState extends State<ReportScreen> {
     setState(() {
       selectedDetailedReport = null;
     });
+    // Check if user navigated from home screen with arguments
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map && args['selectedDetailedReport'] != null) {
+      // User came from home screen, just pop back to home
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (refreshManager != null) {
+      refreshManager!.removeListener(_onRefreshRequested);
+    }
+    // Do not manually dispose Provider.of<ReportProvider>(context, listen: false); ChangeNotifierProvider will handle it
+    super.dispose();
   }
 
   @override
@@ -678,12 +943,19 @@ class _ReportScreenState extends State<ReportScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
 
-    return ChangeNotifierProvider(
-      create: (_) => ReportProvider(),
+    return WillPopScope(
+      onWillPop: () async {
+        if (selectedDetailedReport != null) {
+          setState(() {
+            selectedDetailedReport = null;
+          });
+          return false;
+        }
+        return true;
+      },
       child: Scaffold(
-        backgroundColor: isDark
-            ? const Color(0xFF0F0F0F)
-            : const Color(0xFFF8FAFC),
+        backgroundColor:
+            isDark ? const Color(0xFF0A2342) : const Color(0xFFF8FAFC),
         appBar: AppBar(
           backgroundColor: Colors.white,
           centerTitle: true,
@@ -697,32 +969,7 @@ class _ReportScreenState extends State<ReportScreen> {
             ),
           ),
           actions: [
-            // 1. Remove print icon from app bar.
-            // 2. In the export icon/button next to the search bar, update the container's decoration to use the blue gradient background.
-            // 3. Set dropdown text and icon to blue.
-            // 4. In DetailedReportContainer, reduce the appbar (title) text size to 18.
-            // Example for export icon:
-            // decoration: BoxDecoration(
-            //   gradient: LinearGradient(
-            //     colors: [Color(0xFF0A2342), Color(0xFF123060), Color(0xFF1976D2)],
-            //     begin: Alignment.topLeft,
-            //     end: Alignment.bottomRight,
-            //   ),
-            //   borderRadius: BorderRadius.circular(10),
-            //   boxShadow: [
-            //     BoxShadow(
-            //       color: Color(0xFF1976D2).withOpacity(0.18),
-            //       blurRadius: 6,
-            //       offset: Offset(0, 2),
-            //     ),
-            //   ],
-            // ),
-            // Example for dropdown text/icon:
-            // style: GoogleFonts.poppins(color: Color(0xFF1976D2)),
-            // icon: Icon(Icons.grid_on, color: Color(0xFF1976D2)),
-            // ...
-            // In DetailedReportContainer, set title fontSize: 18
-            // ... existing code ...
+            // Export functionality can be added here
           ],
           iconTheme: const IconThemeData(color: Color(0xFF0A2342)),
           elevation: 0,
@@ -733,7 +980,6 @@ class _ReportScreenState extends State<ReportScreen> {
         body: Stack(
           children: [
             _buildBody(context, isDark, colorScheme),
-            // Detailed Report Overlay
             if (selectedDetailedReport != null)
               Consumer<ReportProvider>(
                 builder: (context, provider, _) {
@@ -764,8 +1010,7 @@ class _ReportScreenState extends State<ReportScreen> {
   ) {
     return RefreshIndicator(
       onRefresh: () async {
-        final provider = Provider.of<ReportProvider>(context, listen: false);
-        await provider.refreshData();
+        await Provider.of<ReportProvider>(context, listen: false).refreshData();
       },
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -967,7 +1212,7 @@ class _ReportScreenState extends State<ReportScreen> {
       child: Container(
         height: 100,
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+          color: isDark ? const Color(0xFF013A63) : Colors.white,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
@@ -1001,10 +1246,10 @@ class _ReportScreenState extends State<ReportScreen> {
                 ),
               ),
             ),
-            const Icon(
+            Icon(
               Icons.arrow_forward_ios_rounded,
               size: 18,
-              color: Colors.grey,
+              color: isDark ? Colors.white : Colors.grey,
             ),
           ],
         ),
@@ -1029,59 +1274,39 @@ class _ReportScreenState extends State<ReportScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFF8FBFF), Color(0xFFEAF1FB)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(12),
-          height: 320, // Reduced height for a more compact graph
-          child: Consumer<ReportProvider>(
-            builder: (context, provider, _) {
-              if (provider.isLoading) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (provider.hasError) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.error_outline_rounded,
-                        size: 48,
-                        color: Colors.grey.shade400,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Failed to load chart data',
-                        style: GoogleFonts.poppins(color: Colors.grey.shade600),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return ComparisonChartWidget(
-                salesData: provider.salesChartData,
-                purchaseData: provider.purchaseChartData,
-                labels:
-                    _getLast7DaysLabels(), // Use new helper for Mon, Tue, ...
-                salesColor: Color(0xFF1976D2),
-                purchaseColor: Color(0xFF128C7E),
-                showZoomControlsBelow: true,
+        Consumer<ReportProvider>(
+          builder: (context, provider, _) {
+            if (provider.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (provider.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      size: 48,
+                      color: Colors.grey.shade400,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Failed to load chart data',
+                      style: GoogleFonts.poppins(color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
               );
-            },
-          ),
+            }
+            return ComparisonChartWidget(
+              salesData: provider.salesChartData,
+              purchaseData: provider.purchaseChartData,
+              labels: _getLast7DaysLabels(), // Use new helper for Mon, Tue, ...
+              salesColor: Color(0xFF1976D2),
+              purchaseColor: Color(0xFF128C7E),
+              showZoomControlsBelow: true,
+            );
+          },
         ),
       ],
     );
@@ -1112,7 +1337,7 @@ class _ReportScreenState extends State<ReportScreen> {
         const SizedBox(height: 16),
         Container(
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+            color: isDark ? const Color(0xFF013A63) : Colors.white,
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
@@ -1177,15 +1402,7 @@ class _ReportScreenState extends State<ReportScreen> {
         ),
         Consumer<ReportProvider>(
           builder: (context, provider, _) {
-            return IconButton(
-              icon: Icon(
-                Icons.refresh_rounded,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-              onPressed: provider.isLoading
-                  ? null
-                  : () => provider.refreshData(),
-            );
+            return Container();
           },
         ),
       ],
@@ -1299,7 +1516,10 @@ Future<void> _exportToExcel(BuildContext context) async {
     final sheet = workbook.worksheets[0];
     if (tableData.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No data to export.'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('No data to export.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -1312,7 +1532,9 @@ Future<void> _exportToExcel(BuildContext context) async {
     for (int row = 0; row < tableData.length; row++) {
       final dataRow = tableData[row];
       for (int col = 0; col < headers.length; col++) {
-        sheet.getRangeByIndex(row + 2, col + 1).setText('${dataRow[headers[col]] ?? ''}');
+        sheet
+            .getRangeByIndex(row + 2, col + 1)
+            .setText('${dataRow[headers[col]] ?? ''}');
       }
     }
     final bytes = workbook.saveAsStream();
@@ -1322,11 +1544,16 @@ Future<void> _exportToExcel(BuildContext context) async {
     await file.writeAsBytes(bytes, flush: true);
     if (!await file.exists() || await file.length() == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to create Excel file.'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('Failed to create Excel file.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
-    await Share.shareXFiles([XFile(file.path)], text: 'Exported Report (Excel)');
+    await Share.shareXFiles([
+      XFile(file.path),
+    ], text: 'Exported Report (Excel)');
   } catch (e) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
@@ -1340,7 +1567,10 @@ Future<void> _exportToWord(BuildContext context) async {
     final tableData = provider.tableData;
     if (tableData.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No data to export.'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('No data to export.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -1355,7 +1585,10 @@ Future<void> _exportToWord(BuildContext context) async {
     await file.writeAsString(buffer.toString());
     if (!await file.exists() || await file.length() == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to create Word file.'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('Failed to create Word file.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -1364,5 +1597,36 @@ Future<void> _exportToWord(BuildContext context) async {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
     );
+  }
+}
+
+// Helper functions for report data
+Map<String, dynamic> _getReportData(String type, ReportProvider provider) {
+  switch (type) {
+    case 'sales':
+      return provider.salesSummary;
+    case 'purchase':
+      return provider.purchaseSummary;
+    case 'expense':
+      return provider.expenseSummary;
+    case 'people':
+      return provider.peopleSummary;
+    default:
+      return {};
+  }
+}
+
+String _getReportTitle(String type) {
+  switch (type) {
+    case 'sales':
+      return 'Sales Report';
+    case 'purchase':
+      return 'Purchase Report';
+    case 'expense':
+      return 'Expense Report';
+    case 'people':
+      return 'People Report';
+    default:
+      return 'Report';
   }
 }

@@ -20,17 +20,26 @@ class ActivityRepository {
     final path = join(dbPath, 'forward_billing.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE IF NOT EXISTS activities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
             type TEXT,
             description TEXT,
             timestamp TEXT,
             metadata TEXT
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Add user_id column if it doesn't exist
+          await db.execute('''
+            ALTER TABLE activities ADD COLUMN user_id TEXT;
+          ''');
+        }
       },
     );
   }
@@ -45,21 +54,25 @@ class ActivityRepository {
     Activity.notifyNewActivity(activity);
   }
 
-  Future<List<Activity>> getRecentActivities({int limit = 20}) async {
+  Future<List<Activity>> getRecentActivities({required String userId, int limit = 20}) async {
     final db = await database;
     final maps = await db.query(
       'activities',
+      where: 'user_id = ?',
+      whereArgs: [userId],
       orderBy: 'timestamp DESC',
       limit: limit,
     );
     return maps.map((m) => Activity.fromMap(m)).toList();
   }
 
-  Stream<List<Activity>> getRecentActivitiesStream({int limit = 20}) async* {
+  Stream<List<Activity>> getRecentActivitiesStream({required String userId, int limit = 20}) async* {
     while (true) {
       final db = await database;
       final maps = await db.query(
         'activities',
+        where: 'user_id = ?',
+        whereArgs: [userId],
         orderBy: 'timestamp DESC',
         limit: limit,
       );

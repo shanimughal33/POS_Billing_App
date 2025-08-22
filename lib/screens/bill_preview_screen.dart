@@ -182,7 +182,7 @@ class BillPreviewScreen extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.all(8.0),
-                child: Text(item.quantity.toString()),
+                child: Text(item.quantityAsInt.toString()),
               ),
               Padding(
                 padding: const EdgeInsets.all(8.0),

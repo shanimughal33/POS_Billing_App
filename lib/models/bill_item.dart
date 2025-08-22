@@ -21,6 +21,33 @@ class BillItem {
 
   double get total => price * quantity;
 
+  // Helper methods for int/double conversion
+  int get priceAsInt => price.toInt();
+  int get quantityAsInt => quantity.toInt();
+
+  // Create from int values
+  factory BillItem.fromInts({
+    int? id,
+    int? billId,
+    required int serialNo,
+    required String name,
+    required int price,
+    required int quantity,
+    DateTime? createdAt,
+    bool isDeleted = false,
+  }) {
+    return BillItem(
+      id: id,
+      billId: billId,
+      serialNo: serialNo,
+      name: name,
+      price: price.toDouble(),
+      quantity: quantity.toDouble(),
+      createdAt: createdAt,
+      isDeleted: isDeleted,
+    );
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -36,33 +63,28 @@ class BillItem {
   }
 
   static BillItem fromMap(Map<String, dynamic> map) {
-    double parseDouble(dynamic value) {
-      if (value == null) return 0.0;
-      if (value is double) return value;
-      if (value is int) return value.toDouble();
-      if (value is String) return double.tryParse(value) ?? 0.0;
-      return 0.0;
-    }
-
     return BillItem(
-      id: map['id'] is int
-          ? map['id'] as int
-          : int.tryParse(map['id'].toString()),
-      billId: map['billId'] is int
-          ? map['billId'] as int
-          : int.tryParse(map['billId'].toString()),
-      serialNo: map['serialNo'] is int
-          ? map['serialNo'] as int
-          : int.tryParse(map['serialNo'].toString()) ?? 0,
-      name: map['name'] as String? ?? map['itemName'] as String? ?? '',
-      price: parseDouble(map['price']),
-      quantity: parseDouble(map['quantity']),
-      createdAt: map['createdAt'] != null
-          ? DateTime.tryParse(map['createdAt'].toString())
+      id: map['id'] != null
+          ? (map['id'] is int ? map['id'] : int.tryParse(map['id'].toString()))
           : null,
-      isDeleted: (map['isDeleted'] is int
-          ? map['isDeleted'] == 1
-          : map['isDeleted'] == true),
+      billId: map['billId'] != null
+          ? (map['billId'] is int
+                ? map['billId']
+                : int.tryParse(map['billId'].toString()))
+          : null,
+      name: map['name'],
+      price: (map['price'] as num).toDouble(),
+      quantity: (map['quantity'] as num).toDouble(),
+      serialNo: map['serialNo'] != null
+          ? (map['serialNo'] is int
+                    ? map['serialNo']
+                    : int.tryParse(map['serialNo'].toString())) ??
+                0
+          : 0,
+      createdAt: map['createdAt'] != null
+          ? DateTime.parse(map['createdAt'])
+          : null,
+      isDeleted: map['isDeleted'] == 1 || map['isDeleted'] == true,
     );
   }
 

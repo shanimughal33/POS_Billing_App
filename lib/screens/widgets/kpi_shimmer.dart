@@ -10,7 +10,7 @@ class KpiShimmer extends StatelessWidget {
 
     return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
         child: Shimmer.fromColors(
           baseColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
           highlightColor: isDark ? Colors.grey.shade700 : Colors.grey.shade100,
@@ -18,10 +18,6 @@ class KpiShimmer extends StatelessWidget {
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
-                width: 1,
-              ),
             ),
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -36,10 +32,7 @@ class KpiShimmer extends StatelessWidget {
                     Container(
                       width: 56,
                       height: 56,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
+                      decoration: BoxDecoration(color: Colors.grey.shade300),
                     ),
                     // Trend indicator shimmer
                     Container(

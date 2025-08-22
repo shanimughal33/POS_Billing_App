@@ -24,7 +24,7 @@ class PieChartWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey.shade900 : Colors.grey.shade50,
+        color: isDark ? Colors.transparent : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
@@ -73,7 +73,7 @@ class PieChartWidget extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: isDark ? Colors.grey.shade800 : Colors.white,
+              color: isDark ? const Color(0xFF013A63) : Colors.white,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,

@@ -1,5 +1,5 @@
 class Expense {
-  final int? id;
+  final String? id; // 🔄 Changed from int? to String?
   final String name;
   final DateTime date;
   final String category;
@@ -8,9 +8,11 @@ class Expense {
   final String? vendor;
   final String? referenceNumber;
   final String? description;
+  final String userId;
 
   Expense({
     this.id,
+    required this.userId,
     required this.name,
     required this.date,
     required this.category,
@@ -23,7 +25,7 @@ class Expense {
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
+      'user_id': userId,
       'name': name,
       'date': date.toIso8601String(),
       'category': category,
@@ -35,14 +37,15 @@ class Expense {
     };
   }
 
-  factory Expense.fromMap(Map<String, dynamic> map) {
+  factory Expense.fromMap(Map<String, dynamic> map, {String? docId}) {
     return Expense(
-      id: map['id'],
-      name: map['name'],
+      id: docId,
+      userId: map['user_id'] ?? '',
+      name: map['name'] ?? '',
       date: DateTime.parse(map['date']),
-      category: map['category'],
-      amount: map['amount'],
-      paymentMethod: map['paymentMethod'],
+      category: map['category'] ?? '',
+      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
+      paymentMethod: map['paymentMethod'] ?? '',
       vendor: map['vendor'],
       referenceNumber: map['referenceNumber'],
       description: map['description'],
@@ -50,7 +53,8 @@ class Expense {
   }
 
   Expense copyWith({
-    int? id,
+    String? id,
+    String? userId,
     String? name,
     DateTime? date,
     String? category,
@@ -62,6 +66,7 @@ class Expense {
   }) {
     return Expense(
       id: id ?? this.id,
+      userId: userId ?? this.userId,
       name: name ?? this.name,
       date: date ?? this.date,
       category: category ?? this.category,

@@ -1,95 +1,137 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:sqflite/sqflite.dart';
 import '../models/people.dart';
-import '../database/database_helper.dart';
 
 class PeopleRepository extends ChangeNotifier {
-  final dbHelper = DatabaseHelper.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<int> insertPerson(People person) async {
-    final db = await dbHelper.database;
-    print('Inserting person: \\n${person.toMap()}');
-    final id = await db.insert(
-      'people',
-      person.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    print('Inserted person with id: $id');
-    return id;
+  PeopleRepository() {
+    // Make sure Firestore works offline
+    _firestore.settings = const Settings(persistenceEnabled: true);
   }
 
-  Future<List<People>> getAllPeople() async {
-    final db = await dbHelper.database;
-    print('Fetching all people (not deleted)...');
-    final List<Map<String, dynamic>> maps = await db.query(
-      'people',
-      where: 'isDeleted = 0 OR isDeleted IS NULL',
-      orderBy: 'name ASC',
-    );
-    final people = List.generate(maps.length, (i) => People.fromMap(maps[i]));
-    print('Fetched ${people.length} people:');
-    for (final p in people) {
-      print(p.toMap());
-    }
-    return people;
+  /// Real-time stream of all active people for a user
+  Stream<List<People>> getPeopleStream(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('people')
+        .where('isDeleted', isEqualTo: false)
+        .orderBy('name')
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => People.fromMap({...doc.data(), 'id': doc.id}))
+              .toList(),
+        );
   }
 
-  Future<People?> getPersonById(int id) async {
-    final db = await dbHelper.database;
-    print('Fetching person by id: $id');
-    final List<Map<String, dynamic>> maps = await db.query(
-      'people',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isNotEmpty) {
-      print('Found person: ${maps.first}');
-      return People.fromMap(maps.first);
+  /// Add a new person — store instantly without awaiting Firestore response
+  Future<String> insertPerson(People person) async {
+    final ref = _firestore
+        .collection('users')
+        .doc(person.userId)
+        .collection('people')
+        .doc();
+
+    // Firestore will store offline if no network
+    ref.set({...person.toMap(), 'isDeleted': false}).catchError((e) {
+      debugPrint('Firestore insert error: $e');
+    });
+
+    notifyListeners();
+    return ref.id; // return generated ID
+  }
+
+  /// Fetch all active people for a user (single read)
+  Future<List<People>> getAllPeople(String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('people')
+          .where('isDeleted', isEqualTo: false)
+          .orderBy('name')
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return People.fromMap({...data, 'id': doc.id});
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching people: $e');
+      return [];
     }
-    print('No person found with id: $id');
+  }
+
+  /// Get a single person by Firestore doc ID
+  Future<People?> getPersonById(String docId, String userId) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('people')
+          .doc(docId)
+          .get();
+
+      if (doc.exists) {
+        return People.fromMap({...doc.data()!, 'id': doc.id});
+      }
+    } catch (e) {
+      debugPrint('Error fetching person: $e');
+    }
     return null;
   }
 
-  Future<List<People>> getPeopleByCategory(String category) async {
-    final db = await dbHelper.database;
-    print('Fetching people by category: $category (not deleted)');
-    final List<Map<String, dynamic>> maps = await db.query(
-      'people',
-      where: '(isDeleted = 0 OR isDeleted IS NULL) AND category = ?',
-      whereArgs: [category],
-      orderBy: 'name ASC',
-    );
-    final people = List.generate(maps.length, (i) => People.fromMap(maps[i]));
-    print('Fetched ${people.length} people in category $category:');
-    for (final p in people) {
-      print(p.toMap());
+  /// Fetch people filtered by category
+  Future<List<People>> getPeopleByCategory(
+    String category,
+    String userId,
+  ) async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('people')
+          .where('category', isEqualTo: category)
+          .where('isDeleted', isEqualTo: false)
+          .orderBy('name')
+          .get();
+
+      return snapshot.docs.map((doc) {
+        return People.fromMap({...doc.data(), 'id': doc.id});
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching people by category: $e');
+      return [];
     }
-    return people;
   }
 
-  Future<int> updatePerson(People person) async {
-    final db = await dbHelper.database;
-    print('Updating person id ${person.id}: \\n${person.toMap()}');
-    final count = await db.update(
-      'people',
-      person.toMap(),
-      where: 'id = ?',
-      whereArgs: [person.id],
-    );
-    print('Updated $count record(s)');
-    return count;
+  /// Update a person — don't await
+  Future<void> updatePerson(People person) async {
+    if (person.id == null) return;
+
+    _firestore
+        .collection('users')
+        .doc(person.userId)
+        .collection('people')
+        .doc(person.id!)
+        .update(person.toMap())
+        .catchError((e) => debugPrint('Update error: $e'));
+
+    notifyListeners();
   }
 
-  Future<int> deletePerson(int id) async {
-    final db = await dbHelper.database;
-    print('Flagging person as deleted with id: $id');
-    final count = await db.update(
-      'people',
-      {'isDeleted': 1},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    print('Flagged $count record(s) as deleted');
-    return count;
+  /// Soft delete person — no await
+  Future<void> deletePerson(String docId, String userId) async {
+    _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('people')
+        .doc(docId)
+        .update({'isDeleted': true})
+        .catchError((e) => debugPrint('Delete error: $e'));
+
+    notifyListeners();
   }
 }

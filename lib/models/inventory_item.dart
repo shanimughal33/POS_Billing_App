@@ -1,27 +1,31 @@
 class InventoryItem {
-  final int? id;
+  final String userId;
   final String name;
   final double price;
   final double quantity;
   final double initialQuantity;
   final String? shortcut;
   final DateTime? createdAt;
-  final bool isSold; // Added isSold property
+  final bool isSold;
+  final String? firestoreId;
+  final bool isDeleted;
 
   InventoryItem({
-    this.id,
+    required this.userId,
     required this.name,
     required this.price,
     required this.quantity,
     double? initialQuantity,
     this.shortcut,
     this.createdAt,
-    this.isSold = false, // Default value is false
+    this.isSold = false,
+    this.isDeleted = false,
+    this.firestoreId,
   }) : initialQuantity = initialQuantity ?? quantity;
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toFirestore() {
     return {
-      'id': id,
+      'user_id': userId,
       'name': name,
       'price': price,
       'quantity': quantity,
@@ -29,57 +33,81 @@ class InventoryItem {
       'shortcut': shortcut,
       'createdAt':
           createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
-      'isSold': isSold ? 1 : 0, // Convert bool to int for SQLite
+      'isSold': isSold,
+      'isDeleted': isDeleted,
     };
   }
 
-  factory InventoryItem.fromMap(Map<String, dynamic> map) {
-    // Defensive: always parse as double for price, quantity, initialQuantity
-    double parseDouble(dynamic value) {
-      if (value == null) return 0.0;
-      if (value is double) return value;
-      if (value is int) return value.toDouble();
-      if (value is String) return double.tryParse(value) ?? 0.0;
-      return 0.0;
-    }
-
+  factory InventoryItem.fromFirestore(Map<String, dynamic> doc, String docId) {
     return InventoryItem(
-      id: map['id'] as int?,
-      name: map['name'] as String,
-      price: parseDouble(map['price']),
-      quantity: parseDouble(map['quantity']),
-      initialQuantity: map['initialQuantity'] != null
-          ? parseDouble(map['initialQuantity'])
-          : parseDouble(map['quantity']),
-      shortcut: map['shortcut'] as String?,
-      createdAt: map['createdAt'] != null
-          ? DateTime.tryParse(map['createdAt'].toString())
-          : null,
-      isSold: map['isSold'] == 1, // Convert int to bool from SQLite
+      firestoreId: docId,
+      userId: doc['user_id'] ?? '',
+      name: doc['name'] ?? '',
+      price: (doc['price'] as num).toDouble(),
+      quantity: (doc['quantity'] as num).toDouble(),
+      initialQuantity: doc['initialQuantity'] != null
+          ? (doc['initialQuantity'] as num).toDouble()
+          : (doc['quantity'] as num).toDouble(),
+      shortcut: doc['shortcut'],
+      createdAt: doc['createdAt'] != null
+          ? DateTime.tryParse(doc['createdAt'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      isSold: doc['isSold'] ?? false,
+      isDeleted: doc['isDeleted'] ?? false,
     );
   }
 
-  get stockQuantity => null;
+  int get priceAsInt => price.toInt();
+  int get quantityAsInt => quantity.toInt();
+  int get initialQuantityAsInt => initialQuantity.toInt();
+
+  factory InventoryItem.fromInts({
+    required String userId,
+    required String name,
+    required int price,
+    required int quantity,
+    int? initialQuantity,
+    String? shortcut,
+    DateTime? createdAt,
+    bool isSold = false,
+    bool isDeleted = false,
+  }) {
+    return InventoryItem(
+      userId: userId,
+      name: name,
+      price: price.toDouble(),
+      quantity: quantity.toDouble(),
+      initialQuantity: initialQuantity?.toDouble(),
+      shortcut: shortcut,
+      createdAt: createdAt,
+      isSold: isSold,
+      isDeleted: isDeleted,
+    );
+  }
 
   InventoryItem copyWith({
-    int? id,
+    String? firestoreId,
+    String? userId,
     String? name,
     double? price,
     double? quantity,
     double? initialQuantity,
     String? shortcut,
     DateTime? createdAt,
-    bool? isSold, // Added isSold to copyWith
+    bool? isSold,
+    bool? isDeleted,
   }) {
     return InventoryItem(
-      id: id ?? this.id,
+      firestoreId: firestoreId ?? this.firestoreId,
+      userId: userId ?? this.userId,
       name: name ?? this.name,
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
       initialQuantity: initialQuantity ?? this.initialQuantity,
       shortcut: shortcut ?? this.shortcut,
       createdAt: createdAt ?? this.createdAt,
-      isSold: isSold ?? this.isSold, // Include isSold in copyWith
+      isSold: isSold ?? this.isSold,
+      isDeleted: isDeleted ?? this.isDeleted,
     );
   }
 }

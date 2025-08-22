@@ -15,6 +15,7 @@ class LineChartWidget extends StatefulWidget {
     required this.labels,
     this.legend = 'Sales',
     this.color = Colors.blue,
+
     this.maxY = 100,
   }) : super(key: key);
 
@@ -95,11 +96,16 @@ class _LineChartWidgetState extends State<LineChartWidget> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.grey.shade300 : Colors.grey.shade600;
-    final gridColor = isDark ? Colors.grey.shade800 : Colors.grey.shade200;
+    final gridColor = const Color(
+      0xFF1976D2,
+    ).withOpacity(0.25); // More visible blue grid
     final bgGradient = LinearGradient(
       colors: isDark
           ? [const Color(0xFF1A1A1A), const Color(0xFF232D36)]
-          : [Colors.white, const Color(0xFFE8F5E9)],
+          : [
+              const Color.fromARGB(255, 244, 247, 250),
+              const Color.fromARGB(255, 228, 240, 253),
+            ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
@@ -111,26 +117,16 @@ class _LineChartWidgetState extends State<LineChartWidget> {
 
     // Calculate chart width based on zoom level - make it more compact when zoomed out
     final baseWidth = (widget.labels.length + 1) * 50.0;
-    final chartWidth = (baseWidth * _zoomLevel).clamp(300.0, 1200.0);
+    final chartWidth = (baseWidth * _zoomLevel).clamp(400.0, 1200.0);
 
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 260, maxHeight: 300),
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 280, maxHeight: 320),
+      padding: const EdgeInsets.all(0), // Remove extra padding
       decoration: BoxDecoration(
         gradient: bgGradient,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(0), // No outer rounding
+        border: Border.all(color: Colors.transparent, width: 0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,14 +135,20 @@ class _LineChartWidgetState extends State<LineChartWidget> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Flexible(
-                child: Text(
-                  widget.legend,
-                  style: GoogleFonts.poppins(
-                    fontSize: _getFontSize(15),
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : Colors.black87,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4.0,
+                    horizontal: 6.0,
                   ),
-                  overflow: TextOverflow.ellipsis,
+                  child: Text(
+                    widget.legend,
+                    style: GoogleFonts.poppins(
+                      fontSize: _getFontSize(15),
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
               // Zoom controls
@@ -168,7 +170,7 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                     ),
                   ),
                   Container(
-                    constraints: const BoxConstraints(minWidth: 40),
+                    constraints: const BoxConstraints(minWidth: 20),
                     child: Text(
                       '${(_zoomLevel * 100).toInt()}%',
                       style: GoogleFonts.poppins(
@@ -219,17 +221,14 @@ class _LineChartWidgetState extends State<LineChartWidget> {
               scrollDirection: Axis.horizontal,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  minWidth: 300,
+                  minWidth: 400,
                   maxWidth: chartWidth,
                 ),
                 child: Container(
-                  width: chartWidth,
-                  height: 320,
-                  padding: EdgeInsets.only(
-                    right: _zoomLevel <= 0.8
-                        ? 40
-                        : 60, // Adjust padding based on zoom
-                  ),
+                  width: 1200,
+                  height: 340,
+                  // Add extra right padding so the last X-axis label (e.g., dates like "Aug 15") doesn't get clipped
+                  padding: const EdgeInsets.fromLTRB(8, 8, 28, 8),
                   child: LineChart(
                     LineChartData(
                       minY: 0,
@@ -242,25 +241,28 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                         getDrawingHorizontalLine: (value) {
                           return FlLine(
                             color: gridColor,
-                            strokeWidth: 1,
-                            dashArray: [5, 5],
+                            strokeWidth: 1.5,
+                            dashArray: [6, 4],
                           );
                         },
                         getDrawingVerticalLine: (value) => FlLine(
-                          color: gridColor.withAlpha((0.5 * 255).toInt()),
-                          strokeWidth: 1,
-                          dashArray: [2, 4],
+                          color: gridColor,
+                          strokeWidth: 1.5,
+                          dashArray: [3, 5],
                         ),
                       ),
                       titlesData: FlTitlesData(
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: _zoomLevel <= 0.8 ? 28 : 32,
+                            reservedSize: 50, // Increased to prevent clipping
                             interval: maxY > 0 ? maxY / 4 : 1,
                             getTitlesWidget: (value, meta) {
                               return Padding(
-                                padding: const EdgeInsets.only(right: 4),
+                                padding: const EdgeInsets.only(
+                                  right: 8,
+                                  left: 4,
+                                ),
                                 child: Text(
                                   value.toInt().toString(),
                                   style: GoogleFonts.poppins(
@@ -277,15 +279,35 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: _zoomLevel <= 0.8 ? 20 : 24,
+                            reservedSize: 30, // Increased for better spacing
                             interval: 1,
                             getTitlesWidget: (value, meta) {
                               final idx = value.toInt();
                               if (idx >= 0 && idx < widget.labels.length) {
+                                // Show days as Mon, Tue, etc. if label is a date
+                                final label = widget.labels[idx];
+                                String dayLabel = label;
+                                try {
+                                  final date = DateTime.tryParse(label);
+                                  if (date != null) {
+                                    dayLabel = [
+                                      'Mon',
+                                      'Tue',
+                                      'Wed',
+                                      'Thu',
+                                      'Fri',
+                                      'Sat',
+                                      'Sun',
+                                    ][date.weekday - 1];
+                                  }
+                                } catch (_) {}
                                 return Padding(
-                                  padding: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.only(
+                                    top: 8,
+                                    bottom: 4,
+                                  ),
                                   child: Text(
-                                    widget.labels[idx],
+                                    dayLabel,
                                     style: GoogleFonts.poppins(
                                       fontSize: _getFontSize(9),
                                       color: textColor,
@@ -307,11 +329,8 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                         ),
                       ),
                       borderData: FlBorderData(
-                        show: true,
-                        border: Border(
-                          bottom: BorderSide(color: gridColor, width: 1),
-                          left: BorderSide(color: gridColor, width: 1),
-                        ),
+                        show: false,
+                        border: Border.all(color: Colors.transparent, width: 0),
                       ),
                       lineBarsData: [
                         LineChartBarData(
@@ -375,8 +394,26 @@ class _LineChartWidgetState extends State<LineChartWidget> {
                               final idx = spot.x.toInt();
                               if (idx < 0 || idx >= widget.labels.length)
                                 return null;
+                              // Show days as Mon, Tue, etc. in tooltip
+                              String dayLabel = widget.labels[idx];
+                              try {
+                                final date = DateTime.tryParse(
+                                  widget.labels[idx],
+                                );
+                                if (date != null) {
+                                  dayLabel = [
+                                    'Mon',
+                                    'Tue',
+                                    'Wed',
+                                    'Thu',
+                                    'Fri',
+                                    'Sat',
+                                    'Sun',
+                                  ][date.weekday - 1];
+                                }
+                              } catch (_) {}
                               return LineTooltipItem(
-                                '${widget.labels[idx]}\n',
+                                '$dayLabel\n',
                                 GoogleFonts.poppins(
                                   color: textColor,
                                   fontSize: _getFontSize(10),

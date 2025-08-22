@@ -6,6 +6,8 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import 'package:animations/animations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/auth_utils.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -62,10 +64,20 @@ class _SignupScreenState extends State<SignupScreen> {
       if (!mounted) return;
       setState(() => _showConfetti = true);
       await Future.delayed(Duration(seconds: 2));
+
+      // Wait for Firebase Auth state to be properly established
+      await Future.delayed(Duration(milliseconds: 500));
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await saveUserUid(user.uid);
+      }
       Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => _info = 'Error: ${e.message ?? 'Unknown error occurred.'}');
+      setState(
+        () => _info = 'Error: ${e.message ?? 'Unknown error occurred.'}',
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _info = 'Error: $e');
@@ -76,7 +88,7 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _signUpWithGoogle() async {
-      setState(() {
+    setState(() {
       _loading = true;
       _info = null;
     });
@@ -84,7 +96,8 @@ class _SignupScreenState extends State<SignupScreen> {
       final GoogleSignIn googleSignIn = GoogleSignIn();
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) throw Exception('Google sign-in aborted');
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
       );
@@ -92,6 +105,14 @@ class _SignupScreenState extends State<SignupScreen> {
       if (!mounted) return;
       setState(() => _showConfetti = true);
       await Future.delayed(Duration(seconds: 2));
+
+      // Wait for Firebase Auth state to be properly established
+      await Future.delayed(Duration(milliseconds: 500));
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await saveUserUid(user.uid);
+      }
       Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     } catch (e) {
       if (!mounted) return;
@@ -123,10 +144,18 @@ class _SignupScreenState extends State<SignupScreen> {
           width: isActive ? 22 : 10,
           height: 10,
           decoration: BoxDecoration(
-            color: isActive ? Color(0xFF1976D2) : Color(0xFF1976D2).withOpacity(0.2),
+            color: isActive
+                ? Color(0xFF1976D2)
+                : Color(0xFF1976D2).withOpacity(0.2),
             borderRadius: BorderRadius.circular(8),
             boxShadow: isActive
-                ? [BoxShadow(color: Color(0xFF1976D2).withOpacity(0.3), blurRadius: 6, spreadRadius: 1)]
+                ? [
+                    BoxShadow(
+                      color: Color(0xFF1976D2).withOpacity(0.3),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    ),
+                  ]
                 : [],
           ),
         );
@@ -136,14 +165,18 @@ class _SignupScreenState extends State<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDark ? Color(0xFF0A2342) : Colors.white;
+    final primaryColor = Color(0xFF1976D2);
+    final textColor = isDark ? Colors.white : Colors.black;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: backgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           child: Stack(
             alignment: Alignment.center,
-              children: [
+            children: [
               if (_showConfetti)
                 Positioned.fill(
                   child: Lottie.asset(
@@ -155,14 +188,17 @@ class _SignupScreenState extends State<SignupScreen> {
                 elevation: 8,
                 borderRadius: BorderRadius.circular(18),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 18,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: backgroundColor,
                     borderRadius: BorderRadius.circular(18),
                   ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       SizedBox(
                         height: 300,
                         child: Lottie.asset(
@@ -178,10 +214,8 @@ class _SignupScreenState extends State<SignupScreen> {
                         height: 320,
                         child: AnimatedSwitcher(
                           duration: Duration(milliseconds: 400),
-                          transitionBuilder: (child, animation) => FadeTransition(
-                            opacity: animation,
-                            child: child,
-                          ),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(opacity: animation, child: child),
                           child: _currentStep == 0
                               ? Form(
                                   key: _formKeys[0],
@@ -189,101 +223,164 @@ class _SignupScreenState extends State<SignupScreen> {
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     key: ValueKey(0),
                                     children: [
-                        TextFormField(
-                          controller: _firstNameController,
-                          decoration: InputDecoration(
-                            labelText: 'First Name',
-                                          prefixIcon: Icon(Icons.person, color: Color(0xFF1976D2)),
-                            border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                      TextFormField(
+                                        controller: _firstNameController,
+                                        decoration: InputDecoration(
+                                          labelText: 'First Name',
+                                          prefixIcon: Icon(
+                                            Icons.person,
+                                            color: isDark ? Colors.white : Color(0xFF1976D2),
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                                              width: 2,
+                                            ),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Color(
+                                                0xFF1976D2,
+                                              ).withOpacity(0.15),
+                                            ),
                                           ),
-                                          fillColor: Colors.grey[50],
+                                          fillColor: isDark ? Colors.white10 : Colors.grey[50],
                                           filled: true,
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            vertical: 10,
+                                            horizontal: 12,
+                                          ),
                                         ),
                                         style: TextStyle(fontSize: 14),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Please enter your first name';
-                            }
-                            if (value.trim().length < 2) {
-                              return 'First name must be at least 2 characters';
-                            }
-                            return null;
-                          },
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return 'Please enter your first name';
+                                          }
+                                          if (value.trim().length < 2) {
+                                            return 'First name must be at least 2 characters';
+                                          }
+                                          return null;
+                                        },
                                       ),
                                       const SizedBox(height: 14),
-                        TextFormField(
-                          controller: _lastNameController,
-                          decoration: InputDecoration(
-                            labelText: 'Last Name',
-                                          prefixIcon: Icon(Icons.person_outline, color: Color(0xFF1976D2)),
-                            border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                      TextFormField(
+                                        controller: _lastNameController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Last Name',
+                                          prefixIcon: Icon(
+                                            Icons.person_outline,
+                                            color: isDark ? Colors.white : Color(0xFF1976D2),
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                                              width: 2,
+                                            ),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Color(
+                                                0xFF1976D2,
+                                              ).withOpacity(0.15),
+                                            ),
                                           ),
-                                          fillColor: Colors.grey[50],
+                                          fillColor: isDark ? Colors.white10 : Colors.grey[50],
                                           filled: true,
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            vertical: 10,
+                                            horizontal: 12,
+                                          ),
                                         ),
                                         style: TextStyle(fontSize: 14),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Please enter your last name';
-                            }
-                            if (value.trim().length < 2) {
-                              return 'Last name must be at least 2 characters';
-                            }
-                            return null;
-                          },
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return 'Please enter your last name';
+                                          }
+                                          if (value.trim().length < 2) {
+                                            return 'Last name must be at least 2 characters';
+                                          }
+                                          return null;
+                                        },
                                       ),
                                       const SizedBox(height: 14),
-                TextFormField(
-                  controller: _emailController,
-                            decoration: InputDecoration(
-                              labelText: 'Email',
-                                          prefixIcon: Icon(Icons.email, color: Color(0xFF1976D2)),
-                              border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                      TextFormField(
+                                        controller: _emailController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Email',
+                                          prefixIcon: Icon(
+                                            Icons.email,
+                                            color: isDark ? Colors.white : Color(0xFF1976D2),
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                                              width: 2,
+                                            ),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Color(
+                                                0xFF1976D2,
+                                              ).withOpacity(0.15),
+                                            ),
                                           ),
-                                          fillColor: Colors.grey[50],
+                                          fillColor: isDark ? Colors.white10 : Colors.grey[50],
                                           filled: true,
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                            ),
-                  keyboardType: TextInputType.emailAddress,
+                                          contentPadding: EdgeInsets.symmetric(
+                                            vertical: 10,
+                                            horizontal: 12,
+                                          ),
+                                        ),
+                                        keyboardType:
+                                            TextInputType.emailAddress,
                                         style: TextStyle(fontSize: 14),
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Please enter your email';
-                              }
-                              if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
-                                return 'Please enter a valid email';
-                              }
-                    return null;
-                  },
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return 'Please enter your email';
+                                          }
+                                          if (!RegExp(
+                                            r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                                          ).hasMatch(value)) {
+                                            return 'Please enter a valid email';
+                                          }
+                                          return null;
+                                        },
                                       ),
                                     ],
                                   ),
@@ -294,97 +391,153 @@ class _SignupScreenState extends State<SignupScreen> {
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     key: ValueKey(1),
                                     children: [
-                TextFormField(
-                  controller: _passwordController,
-                            decoration: InputDecoration(
-                              labelText: 'Password',
-                                          prefixIcon: Icon(Icons.lock, color: Color(0xFF1976D2)),
-                              border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                      TextFormField(
+                                        controller: _passwordController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Password',
+                                          prefixIcon: Icon(
+                                            Icons.lock,
+                                            color: isDark ? Colors.white : Color(0xFF1976D2),
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                                              width: 2,
+                                            ),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Color(
+                                                0xFF1976D2,
+                                              ).withOpacity(0.15),
+                                            ),
                                           ),
-                                          fillColor: Colors.grey[50],
+                                          fillColor: isDark ? Colors.white10 : Colors.grey[50],
                                           filled: true,
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                            ),
-                  obscureText: true,
+                                          contentPadding: EdgeInsets.symmetric(
+                                            vertical: 10,
+                                            horizontal: 12,
+                                          ),
+                                        ),
+                                        obscureText: true,
                                         style: TextStyle(fontSize: 14),
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Please enter your password';
-                              }
-                              if (value.length < 6) {
-                      return 'Password must be at least 6 characters';
-                              }
-                    return null;
-                  },
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return 'Please enter your password';
+                                          }
+                                          if (value.length < 6) {
+                                            return 'Password must be at least 6 characters';
+                                          }
+                                          return null;
+                                        },
                                       ),
                                       const SizedBox(height: 14),
-                TextFormField(
-                            controller: _confirmPasswordController,
-                            decoration: InputDecoration(
-                    labelText: 'Confirm Password',
-                                          prefixIcon: Icon(Icons.lock_outline, color: Color(0xFF1976D2)),
-                              border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                      TextFormField(
+                                        controller: _confirmPasswordController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Confirm Password',
+                                          prefixIcon: Icon(
+                                            Icons.lock_outline,
+                                            color: isDark ? Colors.white : Color(0xFF1976D2),
+                                          ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
                                           ),
                                           focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                                              width: 2,
+                                            ),
                                           ),
                                           enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                            borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Color(
+                                                0xFF1976D2,
+                                              ).withOpacity(0.15),
+                                            ),
                                           ),
-                                          fillColor: Colors.grey[50],
+                                          fillColor: isDark ? Colors.white10 : Colors.grey[50],
                                           filled: true,
-                                          contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                  ),
-                  obscureText: true,
+                                          contentPadding: EdgeInsets.symmetric(
+                                            vertical: 10,
+                                            horizontal: 12,
+                                          ),
+                                        ),
+                                        obscureText: true,
                                         style: TextStyle(fontSize: 14),
-                            validator: (value) {
-                              if (value == null || value.trim().isEmpty) {
-                                return 'Please confirm your password';
-                              }
-                              if (value != _passwordController.text) {
-                      return 'Passwords do not match';
-                              }
-                    return null;
-                  },
+                                        validator: (value) {
+                                          if (value == null ||
+                                              value.trim().isEmpty) {
+                                            return 'Please confirm your password';
+                                          }
+                                          if (value !=
+                                              _passwordController.text) {
+                                            return 'Passwords do not match';
+                                          }
+                                          return null;
+                                        },
                                       ),
                                     ],
                                   ),
                                 ),
-                          ),
                         ),
-                      
+                      ),
+
                       if (_currentStep == 0) ...[
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             ElevatedButton(
                               onPressed: () {
-                                Navigator.pushReplacementNamed(context, '/login');
+                                Navigator.pushReplacementNamed(
+                                  context,
+                                  '/login',
+                                );
                               },
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Color(0xFF1976D2),
+                                backgroundColor: isDark ? Color(0xFF1976D2) : Colors.white,
+                                foregroundColor: isDark ? Colors.white : Color(0xFF1976D2),
                                 shape: StadiumBorder(),
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 10,
+                                ),
                                 elevation: 8,
-                                shadowColor: Color(0xFF1976D2).withOpacity(0.18),
-                                textStyle: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                shadowColor: Color(
+                                  0xFF1976D2,
+                                ).withOpacity(0.18),
+                                textStyle: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.arrow_back, color: Color(0xFF1976D2), size: 20),
+                                  Icon(
+                                    Icons.arrow_back,
+                                    color: isDark ? Colors.white : Color(0xFF1976D2),
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 6),
                                   Text('Back'),
                                 ],
@@ -393,17 +546,29 @@ class _SignupScreenState extends State<SignupScreen> {
                             ElevatedButton(
                               onPressed: _nextStep,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Color(0xFF1976D2),
+                                backgroundColor: isDark ? Colors.white : Color(0xFF1976D2),
                                 shape: StadiumBorder(),
-                                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 32,
+                                  vertical: 12,
+                                ),
                                 elevation: 3,
-                                textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                textStyle: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Text('Next', style: TextStyle(color: Colors.white)),
+                                  Text(
+                                    'Next',
+                                    style: TextStyle(color: isDark ? Colors.black : Colors.white),
+                                  ),
                                   SizedBox(width: 8),
-                                  Icon(Icons.arrow_forward, color: Colors.white),
+                                  Icon(
+                                    Icons.arrow_forward,
+                                    color: isDark ? Colors.black : Colors.white,
+                                  ),
                                 ],
                               ),
                             ),
@@ -418,17 +583,29 @@ class _SignupScreenState extends State<SignupScreen> {
                             ElevatedButton(
                               onPressed: _prevStep,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Color(0xFF1976D2),
+                                backgroundColor: isDark ? Color(0xFF1976D2) : Colors.white,
+                                foregroundColor: isDark ? Colors.white : Color(0xFF1976D2),
                                 shape: StadiumBorder(),
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 12,
+                                ),
                                 elevation: 8,
-                                shadowColor: Color(0xFF1976D2).withOpacity(0.18),
-                                textStyle: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                shadowColor: Color(
+                                  0xFF1976D2,
+                                ).withOpacity(0.18),
+                                textStyle: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.arrow_back, color: Color(0xFF1976D2), size: 20),
+                                  Icon(
+                                    Icons.arrow_back,
+                                    color: isDark ? Colors.white : Color(0xFF1976D2),
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 6),
                                   Text('Back'),
                                 ],
@@ -436,23 +613,41 @@ class _SignupScreenState extends State<SignupScreen> {
                             ),
                             _loading
                                 ? Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 32,
+                                    ),
                                     child: SizedBox(
                                       width: 28,
                                       height: 28,
-                                      child: CircularProgressIndicator(color: Color(0xFF1976D2), strokeWidth: 3),
+                                      child: CircularProgressIndicator(
+                                        color: isDark ? Colors.white : Color(0xFF1976D2),
+                                        strokeWidth: 3,
+                                      ),
                                     ),
                                   )
                                 : ElevatedButton(
                                     onPressed: _signUpWithEmailPassword,
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Color(0xFF1976D2),
+                                      backgroundColor: isDark ? Colors.white : Color(0xFF1976D2),
                                       shape: StadiumBorder(),
-                                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 12,
+                                      ),
                                       elevation: 3,
-                                      textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                      textStyle: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                    child: Text('Sign Up', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                                    child: Text(
+                                      'Sign Up',
+                                      style: TextStyle(
+                                        color: isDark ? Colors.black : Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
                                   ),
                           ],
                         ),
@@ -463,26 +658,32 @@ class _SignupScreenState extends State<SignupScreen> {
                           },
                           child: Text(
                             "Already have an account? Login",
-                            style: TextStyle(color: Color(0xFF1976D2), fontSize: 13, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Color(0xFF1976D2),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
-                          if (_info != null) ...[
+                      if (_info != null) ...[
                         const SizedBox(height: 10),
-                            Text(
-                              _info!,
+                        Text(
+                          _info!,
                           style: TextStyle(
-                                color: _info!.startsWith('Error') ? Colors.red : Colors.green,
+                            color: _info!.startsWith('Error')
+                                ? Colors.red
+                                : Colors.green,
                             fontSize: 13,
-                              ),
-                ),
-              ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-            
-            ),
-          ]),
+              ),
+            ],
+          ),
         ),
       ),
     );

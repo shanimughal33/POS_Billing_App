@@ -1,5 +1,13 @@
-import 'package:flutter/material.dart';
+// This file is deprecated. Please use the new theme system in lib/themes/
+// Import the new theme system
+export '../themes/app_theme.dart';
+export '../themes/light_theme.dart';
+export '../themes/dark_theme.dart';
 
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// Legacy constants for backward compatibility
 // Main dark blue colors
 const Color kDarkBlue = Color(0xFF0A2342);
 const Color kDarkBlue2 = Color(0xFF123060);
@@ -140,3 +148,70 @@ const Color kGrey600 = Color(0xFF757575);
 const Color kGrey700 = Color(0xFF616161);
 const Color kWhite70 = Color(0xB3FFFFFF);
 const Color kBlack12 = Color(0x1F000000);
+
+// Add these methods for theme persistence
+Future<void> saveThemeMode(ThemeMode mode) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('theme_mode', mode.toString());
+}
+
+Future<ThemeMode> loadThemeMode() async {
+  final prefs = await SharedPreferences.getInstance();
+  final savedMode = prefs.getString('theme_mode');
+  switch (savedMode) {
+    case 'ThemeMode.dark':
+      return ThemeMode.dark;
+    case 'ThemeMode.light':
+      return ThemeMode.light;
+    default:
+      return ThemeMode.system;
+  }
+}
+
+// Dark theme colors
+ const darkBackground = Color(0xFF0A2342);
+ const darkCardColor = Color(0xFF1A2233);
+ const darkTextColor = Colors.white;
+ const darkPrimaryColor = Color(0xFF1976D2);
+
+// Dark theme styles
+ final darkThemeData = ThemeData(
+  brightness: Brightness.dark,
+  scaffoldBackgroundColor: darkBackground,
+  cardColor: darkCardColor,
+  primaryColor: darkPrimaryColor,
+  textTheme: TextTheme(
+    bodyLarge: TextStyle(color: darkTextColor),
+    bodyMedium: TextStyle(color: darkTextColor),
+  ),
+  appBarTheme: AppBarTheme(
+    backgroundColor: darkCardColor,
+    elevation: 0,
+    iconTheme: IconThemeData(color: darkTextColor),
+  ),
+  inputDecorationTheme: InputDecorationTheme(
+    filled: true,
+    fillColor: darkCardColor,
+    labelStyle: TextStyle(color: darkTextColor.withOpacity(0.87)),
+    hintStyle: TextStyle(color: darkTextColor.withOpacity(0.6)),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: darkPrimaryColor.withOpacity(0.15)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: darkPrimaryColor, width: 2),
+    ),
+  ),
+  elevatedButtonTheme: ElevatedButtonThemeData(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: darkPrimaryColor,
+      foregroundColor: darkTextColor,
+    ),
+  ),
+  textButtonTheme: TextButtonThemeData(
+    style: TextButton.styleFrom(
+      foregroundColor: darkPrimaryColor,
+    ),
+  ),
+);

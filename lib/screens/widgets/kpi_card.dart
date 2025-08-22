@@ -81,7 +81,7 @@ class _KpiCardState extends State<KpiCard> with SingleTickerProviderStateMixin {
     // Define colors based on theme
     final Color upColor = const Color(0xFF10B981); // Emerald
     final Color downColor = const Color(0xFFEF4444); // Red
-    final Color cardColor = isDark ? const Color(0xFF1A1A1A) : Colors.white;
+    final Color cardColor = isDark ? const Color(0xFF013A63) : Colors.white;
     final Color iconBgColor = widget.color ?? _getKpiIconColor(widget.title);
 
     return AnimatedBuilder(
@@ -95,7 +95,9 @@ class _KpiCardState extends State<KpiCard> with SingleTickerProviderStateMixin {
               margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               decoration: BoxDecoration(
                 color: cardColor,
-                borderRadius: BorderRadius.circular(6), // Less rounded for a more square look
+                borderRadius: BorderRadius.circular(
+                  6,
+                ), // Less rounded for a more square look
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.1),
@@ -116,15 +118,11 @@ class _KpiCardState extends State<KpiCard> with SingleTickerProviderStateMixin {
                     spreadRadius: 0,
                   ),
                 ],
-                border: Border.all(
-                  color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
-                  width: 1.5,
-                ),
               ),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(0),
                   onTap: () {
                     // Add haptic feedback
                     HapticFeedback.lightImpact();

@@ -44,7 +44,7 @@ class Bill {
       'discount': discount,
       'tax': tax,
       'total': total,
-      'isDeleted': isDeleted ? 1 : 0,
+      'isDeleted': isDeleted,
     };
   }
 

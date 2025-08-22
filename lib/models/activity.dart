@@ -3,6 +3,7 @@ import 'dart:async';
 
 class Activity extends ChangeNotifier {
   final int? id;
+  final String userId;
   final String type; // e.g., sale, purchase, people_add, people_edit, etc.
   final String description;
   final DateTime timestamp;
@@ -10,6 +11,7 @@ class Activity extends ChangeNotifier {
 
   Activity({
     this.id,
+    required this.userId,
     required this.type,
     required this.description,
     required this.timestamp,
@@ -18,12 +20,15 @@ class Activity extends ChangeNotifier {
 
   factory Activity.fromMap(Map<String, dynamic> map) {
     return Activity(
-      id: map['id'] as int?,
-      type: map['type'] as String,
-      description: map['description'] as String,
-      timestamp: DateTime.parse(map['timestamp'] as String),
+      id: map['id'] != null
+          ? (map['id'] is int ? map['id'] : int.tryParse(map['id'].toString()))
+          : null,
+      userId: map['user_id'] ?? '',
+      type: map['type'],
+      description: map['description'],
+      timestamp: DateTime.parse(map['timestamp']),
       metadata: map['metadata'] != null
-          ? Map<String, dynamic>.from(_decodeMetadata(map['metadata']))
+          ? _decodeMetadata(map['metadata'])
           : null,
     );
   }
@@ -31,6 +36,7 @@ class Activity extends ChangeNotifier {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'user_id': userId,
       'type': type,
       'description': description,
       'timestamp': timestamp.toIso8601String(),
@@ -57,8 +63,10 @@ class Activity extends ChangeNotifier {
     return {};
   }
 
-  static final StreamController<Activity> _activityStreamController = StreamController.broadcast();
-  static Stream<Activity> get activityStream => _activityStreamController.stream;
+  static final StreamController<Activity> _activityStreamController =
+      StreamController.broadcast();
+  static Stream<Activity> get activityStream =>
+      _activityStreamController.stream;
 
   static void notifyNewActivity(Activity activity) {
     _activityStreamController.add(activity);

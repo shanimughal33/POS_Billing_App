@@ -50,13 +50,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Colors.white, // White background
+      backgroundColor: isDark ? Color(0xFF0A2342) : Colors.white,
       appBar: AppBar(
-        title: Text('Reset Password', style: TextStyle(color: Color(0xFF1976D2), fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        backgroundColor: isDark ? Color(0xFF0A2342) : Colors.white,
         elevation: 0,
-        iconTheme: IconThemeData(color: Color(0xFF1976D2)),
+        iconTheme: IconThemeData(
+          color: isDark ? Colors.white : Color(0xFF1976D2),
+        ),
+        title: Text(
+          'Reset Password',
+          style: TextStyle(
+            color: isDark ? Colors.white : Color(0xFF1976D2),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -88,36 +97,55 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 Text(
                   'Enter your email to receive a reset link.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: Colors.black54),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
                 ),
                 const SizedBox(height: 18),
                 TextFormField(
                   controller: _emailController,
                   decoration: InputDecoration(
                     labelText: 'Email',
-                    prefixIcon: Icon(Icons.email, color: Color(0xFF1976D2)),
+                    prefixIcon: Icon(
+                      Icons.email,
+                      color: isDark ? Colors.white : Color(0xFF1976D2),
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
+                      borderSide: BorderSide(
+                        color: Color(0xFF1976D2),
+                        width: 2,
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Color(0xFF1976D2).withOpacity(0.15)),
+                      borderSide: BorderSide(
+                        color: Color(0xFF1976D2).withOpacity(0.15),
+                      ),
                     ),
-                    fillColor: Colors.grey[50],
+                    fillColor: isDark ? Colors.white10 : Colors.grey[50],
                     filled: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 12,
+                    ),
                   ),
                   keyboardType: TextInputType.emailAddress,
-                  style: TextStyle(fontSize: 14),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your email';
                     }
-                    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
+                    if (!RegExp(
+                      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                    ).hasMatch(value)) {
                       return 'Please enter a valid email';
                     }
                     return null;
@@ -125,19 +153,30 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 ),
                 const SizedBox(height: 14),
                 _loading
-                    ? const CircularProgressIndicator(color: Color(0xFF1976D2))
+                    ? CircularProgressIndicator(
+                        color: isDark ? Colors.white : Color(0xFF1976D2),
+                      )
                     : SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: _sendResetLink,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Color(0xFF1976D2),
+                            backgroundColor: isDark
+                                ? Colors.white
+                                : Color(0xFF1976D2),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: Text('Send Reset Link', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                          child: Text(
+                            'Send Reset Link',
+                            style: TextStyle(
+                              color: isDark ? Colors.black : Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
                         ),
                       ),
                 if (_info != null) ...[
@@ -146,7 +185,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     _info!,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: _info!.startsWith('Error') ? Colors.red : Colors.green,
+                      color: _info!.startsWith('Error')
+                          ? Colors.red
+                          : Colors.green,
                       fontSize: 13,
                     ),
                   ),
@@ -159,4 +200,3 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     );
   }
 }
- 
